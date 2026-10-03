@@ -113,7 +113,8 @@ Money = numbers in dollars. Dates = ISO `YYYY-MM-DD` (Pacific). Unknown optional
 Categories: `food, groceries, fun, subs, shopping, gas, bills, fees, income, transfer, cash, other`.
 Weekly buckets: **Food** = `food` (restaurants, fast food, DoorDash) + `groceries` (grocery stores incl. Safeway/Fred Meyer,
 convenience-store food); **Fun** = `fun` (games, movies, entertainment, digital purchases like Google/Play/Steam) +
-`shopping` (other discretionary). `subs`/`bills`/`fees` show under the Bills filter.
+`shopping` (other discretionary). `subs`/`bills`/`fees` show under the Bills filter. A small recurring storage subscription (e.g. a `G1SK…` card
+descriptor) is renamed to `Google One storage` and categorized `subs`, so it matches its monthly bill instead of counting as Fun.
 Icons: `gamepad, gift, food, home, phone, card, shield, wifi, book, music, tv, bag, sparkle, target, wallet` (+ category names).
 Tags with styling: `CASH, BNPL, VARIES, SUB` (any other text renders neutral). Bill `id`s must be unique.
 Goal math: remaining paydays = weekly from `paycheck.next_date` to `due` (or `window` end); projected =

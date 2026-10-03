@@ -11,7 +11,7 @@ Output is sorted newest first and de-duplicated by id. Never commit the CSV inpu
 import csv, json, sys, re, argparse, hashlib
 
 LABELS = {}  # last4 -> friendly account label, filled from --label
-SUBS = ('spotify', 'play books', 'paramount', 'apple', 'microsoft', 'youtube', 'amazon prime', 'netflix', 'hulu', 'disney')
+SUBS = ('google one', 'spotify', 'play books', 'paramount', 'apple', 'microsoft', 'youtube', 'amazon prime', 'netflix', 'hulu', 'disney')
 GROCERS = ('safeway', 'fred meyer', 'winco', 'kroger', 'albertsons', 'trader joe', 'grocery outlet', 'costco', 'whole foods', 'qfc')
 DIGITAL = ('google', 'steam', 'xbox', 'playstation', 'nintendo', 'epic games', 'roblox', 'itunes', 'fandango', 'cinema', 'theater', 'regal', 'amc')
 
@@ -46,6 +46,8 @@ def clean(name, merchant, cat, amount, last4):
         other = t.group(2); lbl = LABELS.get(other, 'account')
         return f"{'To' if t.group(1) == 'to' else 'From'} {lbl} ••{other}"
     if 'CAPITAL ONE' in n.upper(): return 'Capital One'
+    # Google One photo storage: card descriptor G1SK…, or a $1.99 Google charge -> monthly SUB bill, not Fun
+    if 'G1SK' in n.upper() or ('google' in (m + ' ' + n).lower() and abs(amount) == 1.99): return 'Google One storage'
     if m: return m
     n = re.sub(r'^(Point Of Sale Withdrawal|External Withdrawal|Withdrawal|Deposit)\s+', '', n)
     n = re.sub(r'\d{5,}', '', n)

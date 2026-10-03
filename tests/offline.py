@@ -38,6 +38,19 @@ async def main():
             finally:
                 shutil.copy(bak, src); os.remove(bak)
             await p.reload(); await p.wait_for_selector('#app:not([hidden])'); await p.wait_for_timeout(600)
+            # shell update: a new build (new sw.js cache name) must take over and reload the open app automatically
+            v0 = await p.evaluate("caches.keys()"); await p.evaluate("window.__oldPage = 1")
+            subprocess.run([os.path.join(ROOT, 'tools', 'build.sh')], check=True, capture_output=True, env={**os.environ, 'VER': 'test' + str(os.getpid())})
+            await p.evaluate("__MM.S.reg && __MM.S.reg.update()")
+            try:
+                await p.wait_for_function("!window.__oldPage && window.__MM && __MM.S.data", timeout=20000)
+                v1 = await p.evaluate("caches.keys()")
+                check(f'moneyman-test{os.getpid()}' in v1 and not (set(v0) - {'moneyman-data'}) & set(v1), f'new shell auto-installed + reloaded: {v0} -> {v1}')
+            except Exception as e:
+                check(False, f'new shell did not take over: {e}')
+            subprocess.run([os.path.join(ROOT, 'tools', 'build.sh')], check=True, capture_output=True)
+            await p.evaluate("window.__oldPage = 1; __MM.S.reg.update()")
+            await p.wait_for_function("!window.__oldPage && window.__MM && __MM.S.data", timeout=20000); await p.wait_for_timeout(500)
         await ctx.set_offline(True); await p.reload(); await p.wait_for_timeout(1500)
         vis = await p.is_visible('#app'); title = await p.evaluate("document.querySelector('.h-title')?.textContent")
         fonts = await p.evaluate("document.fonts.check('600 16px Inter') && document.fonts.check('700 20px Sora')")
@@ -45,6 +58,8 @@ async def main():
         check(fonts, 'fonts available offline')
         await p.click('.tab[data-tab="bills"]'); await p.wait_for_timeout(500)
         check('Rent' in await p.inner_text('#screen'), 'offline data (bills) renders')
+        k = await p.evaluate("__MM.billInstances().find(b => !b.paid).key"); await p.click(f'.chk[data-key="{k}"]'); await p.wait_for_timeout(1200)
+        check(await p.locator(f'#bills-paid .bill[data-key="{k}"]').count() == 1, 'bill checkbox works offline')
         await b.close()
     print('OFFLINE SUITE:', 'ALL PASS' if ok else 'FAILED'); sys.exit(0 if ok else 1)
 asyncio.run(main())

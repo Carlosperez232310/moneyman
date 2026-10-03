@@ -4,10 +4,10 @@
 'use strict';
 const VER = '__VER__';
 const TZ = 'America/Los_Angeles';
-const K_KEY = 'moneyman.key.v1', K_CASH = 'moneyman.cash.v1', K_TIP = 'moneyman.tip.v1', K_TAB = 'moneyman.tab.v1';
+const K_KEY = 'moneyman.key.v1', K_CASH = 'moneyman.cash.v1', K_TIP = 'moneyman.tip.v1', K_TAB = 'moneyman.tab.v1', K_PAID = 'moneyman.paid.v1';
 const $ = (s, r = document) => r.querySelector(s);
 const enc = new TextEncoder(), dec = new TextDecoder();
-const S = { env: null, key: null, data: null, tab: 'home', filter: 'all', lastFetch: 0, animate: true };
+const S = { env: null, key: null, data: null, tab: 'home', filter: 'all', lastFetch: 0, animate: true, showCancelled: false };
 
 /* ---------------- icons ---------------- */
 const P = {
@@ -50,10 +50,12 @@ const P = {
   bolt: '<path d="M13 2 4 14h7l-1 8 9-12h-7z"/>',
 };
 const ic = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24">${P[n] || P.other}</svg>`;
-const CAT = { food: 'Eating out', groceries: 'Groceries', fun: 'Fun', subs: 'Subscription', shopping: 'Shopping', gas: 'Gas',
+const CAT = { food: 'Eating out', groceries: 'Groceries & snacks', fun: 'Fun', subs: 'Subscription', shopping: 'Shopping · fun', gas: 'Gas',
   bills: 'Bills', fees: 'Bank fee', income: 'Income', transfer: 'Transfer', cash: 'Cash', other: 'Other' };
-const FILTERS = [['all', 'All'], ['food', 'Food', ['food', 'groceries']], ['fun', 'Fun', ['fun', 'subs']], ['shopping', 'Shopping', ['shopping', 'gas']],
-  ['bills', 'Bills', ['bills', 'fees']], ['income', 'Income', ['income']], ['transfer', 'Transfers', ['transfer', 'cash']]];
+// Weekly buckets: Food = eating out + groceries/convenience food; Fun = games, entertainment, digital + other discretionary
+const bucketOf = c => (c === 'food' || c === 'groceries') ? 'food' : (c === 'fun' || c === 'shopping') ? 'fun' : null;
+const FILTERS = [['all', 'All'], ['food', 'Food', ['food', 'groceries']], ['fun', 'Fun', ['fun', 'shopping']],
+  ['bills', 'Bills', ['bills', 'fees', 'subs']], ['income', 'Income', ['income']], ['transfer', 'Transfers', ['transfer', 'cash']]];
 
 /* ---------------- formatting & dates ---------------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -171,17 +173,66 @@ function cashEntries() {
   try { return (JSON.parse(localStorage.getItem(K_CASH) || '[]') || []).filter(e => e.week === D().week.start); } catch (e) { return []; }
 }
 function weekCalc() {
-  const w = D().week, cash = cashEntries();
-  const spentData = (w.purchases || []).reduce((s, p) => s + (+p.amount || 0), 0);
-  const spentCash = cash.reduce((s, c) => s + c.amount, 0);
-  const spent = spentData + spentCash, budget = +w.budget, left = budget - spent;
+  const w = D().week, cash = cashEntries(), total = +w.budget || 0;
+  const sp = w.split || { food: 0.7, fun: 0.3 }, sf = (+sp.food || 0) / ((+sp.food || 0) + (+sp.fun || 0) || 1);
+  const foodB = w.budgets && w.budgets.food != null ? +w.budgets.food : Math.round(total * sf);
+  const funB = w.budgets && w.budgets.fun != null ? +w.budgets.fun : Math.round((total - foodB) * 100) / 100;
   const t = dn(todayISO()), st = dn(w.start), en = dn(w.end);
   const daysLeft = Math.max(0, Math.min(en - st + 1, en - Math.max(t, st) + 1));
   const elapsed = Math.min(1, Math.max(0, (t - st + 1) / (en - st + 1)));
-  const pct = budget ? spent / budget : 0;
-  const tone = pct > 1 ? 'red' : pct > 0.8 ? 'amber' : '';
-  return { w, cash, spent, budget, left, daysLeft, elapsed, pct, tone, perDay: daysLeft ? Math.max(0, left) / daysLeft : 0 };
+  const items = [...(w.purchases || []).map(p => ({ ...p, bucket: p.bucket || bucketOf(p.category) || 'fun' })),
+    ...cash.map(x => ({ id: x.id, date: x.date, amount: x.amount, merchant: x.note || (x.cat === 'fun' ? 'Cash · fun' : 'Cash · food'),
+      note: 'Cash · this phone', category: x.cat === 'fun' ? 'fun' : 'food', bucket: x.cat === 'fun' ? 'fun' : 'food', cash: true }))];
+  const mk = (key, budget) => {
+    const its = items.filter(i => i.bucket === key).sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+    const spent = Math.round(its.reduce((s, i) => s + (+i.amount || 0), 0) * 100) / 100, left = Math.round((budget - spent) * 100) / 100;
+    const pct = budget ? spent / budget : (spent > 0 ? 2 : 0), tone = pct > 1 ? 'red' : pct > 0.8 ? 'amber' : '';
+    const status = left < 0 ? ['red', `Over by ${fmt(-left)}`] : pct > 0.8 ? ['amber', 'Almost gone'] : pct > elapsed + 0.08 ? ['amber', 'Spending fast'] : ['', 'On track'];
+    return { key, budget, spent, left, pct, tone, status, items: its, perDay: daysLeft ? Math.max(0, left) / daysLeft : 0 };
+  };
+  const food = mk('food', foodB), fun = mk('fun', funB);
+  return { w, cash, total, food, fun, split: { food: total ? foodB / total : sf, fun: total ? funB / total : 1 - sf },
+    daysLeft, elapsed, spent: food.spent + fun.spent, left: food.left + fun.left };
 }
+
+/* ---------------- bills: monthly instances, paid state ---------------- */
+const slug = s => String(s || 'bill').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+function paidMap() { try { return JSON.parse(localStorage.getItem(K_PAID) || '{}') || {}; } catch (e) { return {}; } }
+function setPaid(key, val, auto) {
+  const m = paidMap(); if (!!val === !!auto) delete m[key]; else m[key] = !!val;
+  const cutoff = isoOf(dn(todayISO()) - 120).slice(0, 7);  // keep ~4 months of history
+  for (const k of Object.keys(m)) if ((k.split(':').pop() || '') < cutoff) delete m[k];
+  localStorage.setItem(K_PAID, JSON.stringify(m));
+}
+function billInstances() {
+  const bills = D().bills || {}, defs = bills.items || bills.upcoming || [], today = todayISO(), per = today.slice(0, 7);
+  const [y, m] = per.split('-').map(Number), dim = new Date(Date.UTC(y, m, 0)).getUTCDate(), endN = dn(`${per}-${String(dim).padStart(2, '0')}`);
+  const local = paidMap(), used = new Set(), tx = D().transactions || [], out = [];
+  for (const b of defs) {
+    let date = null, period = per;
+    if (b.due_day) date = `${per}-${String(Math.min(+b.due_day, dim)).padStart(2, '0')}`;
+    else if (b.date) { date = b.date; period = b.date.slice(0, 7); }
+    const id = b.id || slug(b.name), key = `${id}:${period}`;
+    let auto = null;
+    const lo = date ? dn(date) - (b.match && b.match.early_days != null ? +b.match.early_days : 7) : dn(`${period}-01`);
+    const hi = date && period !== per ? dn(date) + 31 : endN;
+    if (b.paid && (b.paid_period ? b.paid_period === period : (!b.paid_date || (dn(b.paid_date) >= lo && dn(b.paid_date) <= hi))))
+      auto = { date: b.paid_date || null, amount: b.paid_amount != null ? +b.paid_amount : null, source: 'data' };
+    if (!auto && b.match && date) {
+      const mm = String(b.match.merchant || b.name).toLowerCase(), mn = b.match.min != null ? +b.match.min : 0, mx = b.match.max != null ? +b.match.max : 1e9;
+      const hit = tx.find(t => t.amount < 0 && !used.has(t.id || t.date + t.merchant + t.amount) && String(t.merchant || '').toLowerCase().includes(mm)
+        && -t.amount >= mn && -t.amount <= mx && dn(t.date) >= lo && dn(t.date) <= hi);
+      if (hit) { used.add(hit.id || hit.date + hit.merchant + hit.amount); auto = { date: hit.date, amount: -hit.amount, source: 'bank' }; }
+    }
+    const paid = key in local ? local[key] : !!auto;
+    if (period < per && paid) continue;  // finished one-off bills from earlier months
+    out.push({ ...b, id, key, date, period, auto, paid });
+  }
+  return out;
+}
+const byDue = (x, y) => (x.date ? 0 : 1) - (y.date ? 0 : 1) || String(x.date).localeCompare(String(y.date));
+const unpaidBills = () => billInstances().filter(b => !b.paid).sort(byDue);
+const billSum = list => list.reduce((s, b) => s + (b.paid && b.auto && b.auto.amount != null ? b.auto.amount : b.amount ? +b.amount : 0), 0);
 
 /* ---------------- render ---------------- */
 function ring(pct, size = 142, stroke = 13, id = 'rg') {
@@ -212,12 +263,11 @@ function vHome() {
       <div class="info"><div class="gname">${ic(g.icon || 'target')}${esc(g.name)}</div>
       <div class="big">${countM(c.saved)}</div><div class="sub">of ${smart(c.target)} goal</div><div class="sub"><b style="color:var(--text);font-weight:600">${fmt(c.togo)}</b> to go</div>${statusPill(c)}</div></div>`;
   }
-  const tone = wk.tone;
-  h += `<div class="tiles">
-    <div class="card tile glow-mint pressable" data-action="nav" data-tab="week"><div><div class="lbl">${ic('food')}Food & fun left</div>
-      <div class="v ${wk.left < 0 ? 'red' : ''}">${countM(wk.left)}</div><div class="s">${wk.daysLeft ? `${fmt(wk.perDay)}/day · ${wk.daysLeft} day${wk.daysLeft > 1 ? 's' : ''}` : 'Week ended'}</div></div>
-      <div class="mini ${tone}"><b data-w="${Math.min(100, wk.pct * 100)}"></b></div>
-      <button class="add" data-action="cash" aria-label="I spent cash">${ic('plus')}</button></div>
+  const bTile = (b, label, icon, glow) => `<div class="card tile ${glow} pressable" data-action="nav" data-tab="week"><div><div class="lbl">${ic(icon)}${label}</div>
+      <div class="v ${b.left < 0 ? 'neg' : ''}">${countM(b.left)}</div><div class="s ${b.left < 0 ? 'neg' : ''}">${b.left < 0 ? `Over budget · ${fmt0(b.budget)} plan` : wk.daysLeft ? `${fmt(b.perDay)}/day · ${wk.daysLeft} day${wk.daysLeft > 1 ? 's' : ''}` : 'Week ended'}</div></div>
+      <div class="mini ${b.tone}"><b data-w="${Math.min(100, b.pct * 100)}"></b></div>
+      <button class="add" data-action="cash" data-b="${b.key}" aria-label="I spent cash on ${b.key}">${ic('plus')}</button></div>`;
+  h += `<div class="tiles">${bTile(wk.food, 'Food left', 'food', 'glow-amber')}${bTile(wk.fun, 'Fun left', 'fun', 'glow-pink')}
     <div class="card tile glow-cyan pressable" data-action="nav" data-tab="activity"><div><div class="lbl">${ic('wallet')}Checking</div>
       <div class="v">${chk ? countM(chk.available) : '—'}</div><div class="s">${chk ? `Available · ••${esc(chk.mask)}` : ''}</div></div></div>
     <div class="card tile glow-violet"><div><div class="lbl">${ic('calendar')}Next payday</div>
@@ -225,14 +275,14 @@ function vHome() {
       <div class="s">${np ? `${esc(dfmt(np, { weekday: 'long' }))} · ${relDay(np)}` : ''}</div>${pc.typical_min ? `<div class="s" style="margin-top:2px">${esc(pc.employer || 'Paycheck')} ~${fmt0(pc.typical_min)}–${fmt0(pc.typical_max)}</div>` : ''}</div></div>`;
   if (bday) {
     const b = goalCalc(bday);
-    h += `<div class="card tile glow-pink pressable" data-action="nav" data-tab="goals"><div><div class="lbl">${ic(bday.icon || 'gift')}${esc(bday.short || 'Birthday fund')}</div>
-      <div class="v">${countM(b.saved, '', { cents: false })}<span style="font-size:14px;color:var(--dim);font-family:var(--body);font-weight:500;letter-spacing:0"> / ${fmt0(b.target)}</span></div>
-      <div class="s">${b.days != null ? `${b.days} days to go` : ''}</div></div><div class="mini pink"><b data-w="${b.pct * 100}"></b></div></div>`;
+    h += `<div class="card tile wide glow-pink pressable" data-action="nav" data-tab="goals"><div class="wide-row"><div><div class="lbl">${ic(bday.icon || 'gift')}${esc(bday.short || 'Birthday fund')}</div>
+      <div class="v">${countM(b.saved, '', { cents: false })}<span class="of"> / ${fmt0(b.target)}</span></div></div>
+      <div class="wide-r"><div class="s">${b.days != null ? `${b.days} days to go` : ''}</div>${statusPill(b)}</div></div><div class="mini pink"><b data-w="${b.pct * 100}"></b></div></div>`;
   }
   h += `</div>`;
-  const up = upcomingBills().filter(b => b.date).slice(0, 2);
-  if (up.length) h += `<div class="sec-h"><h3>Coming up</h3><span>${esc(fmtTotal(upcomingBills()))} upcoming</span></div>
-    <div class="card list pressable" data-action="nav" data-tab="bills">${up.map(billRow).join('')}</div>`;
+  const up = unpaidBills().filter(b => b.date);
+  if (up.length) h += `<div class="sec-h"><h3>Coming up</h3><span>~${esc(fmt0(billSum(unpaidBills())))} left this month</span></div>
+    <div class="card list pressable" data-action="nav" data-tab="bills">${up.slice(0, 2).map(billMini).join('')}</div>`;
   if (ios && !standalone && !localStorage.getItem(K_TIP)) h += `<div class="card install"><div class="mid">Install: tap <b>Share</b> then <b>Add to Home Screen</b> to open MoneyMan like an app.</div><button class="del x" data-action="tip" aria-label="Dismiss">${ic('x')}</button></div>`;
   return h;
 }
@@ -282,60 +332,85 @@ function purchaseRow(p) {
     <div class="t2">${esc(wdShort(p.date))}${p.note ? ' · ' + esc(p.note) : ' · ' + esc(CAT[cat] || '')}</div></div><div class="amt">${fmt(p.amount)}</div>
     ${p.cash ? `<button class="del" data-action="del-cash" data-id="${esc(p.id)}" aria-label="Remove cash entry">${ic('x')}</button>` : ''}</div>`;
 }
+function budgetCard(b, c) {
+  const name = b.key === 'food' ? 'Food' : 'Fun';
+  return `<div class="card week-hero bucket ${b.key}" data-bucket="${b.key}"><div class="top"><div class="bh"><div class="ico ${b.key}">${ic(b.key)}</div>
+      <div><div class="eyebrow">${name} · left</div><div class="big ${b.left < 0 ? 'red' : ''}">${countM(b.left)}</div></div></div>
+      <span class="pill ${b.status[0]}"><i></i>${esc(b.status[1])}</span></div>
+    <div class="bar ${b.tone}"><b data-w="${Math.min(100, b.pct * 100)}"></b><span class="tick" style="left:calc(${(c.elapsed * 100).toFixed(1)}% - 1px)"></span></div>
+    <div class="goal-meta"><span><b>${Math.round(b.pct * 100)}%</b> spent</span><span>${c.daysLeft ? (b.left > 0 ? `<b>${fmt(b.perDay)}</b>/day · ${c.daysLeft} day${c.daysLeft > 1 ? 's' : ''} left` : `Nothing left · ${c.daysLeft} day${c.daysLeft > 1 ? 's' : ''} to go`) : 'Week over'}</span></div>
+    <div class="trio"><div class="stat"><div class="k">Budget</div><div class="v">${smart(b.budget)}</div></div><div class="stat"><div class="k">Spent</div><div class="v">${fmt(b.spent)}</div></div>
+      <div class="stat"><div class="k">Left</div><div class="v" style="color:${b.left < 0 ? '#ff8792' : 'var(--mint)'}">${fmt(b.left)}</div></div></div></div>`;
+}
 function vWeek() {
   const c = weekCalc(), w = c.w;
-  const status = c.left < 0 ? ['red', `Over by ${fmt(-c.left)}`] : c.pct > 0.8 ? ['amber', 'Almost gone'] : c.pct > c.elapsed + 0.08 ? ['amber', 'Spending fast'] : ['', 'On track'];
-  let h = `<div><div class="eyebrow">Food & fun · Wed–Tue</div><h1 class="h-title">This week</h1><div class="h-sub">${esc(wdShort(w.start))} – ${esc(wdShort(w.end))}</div></div>
-    <div class="card week-hero"><div class="top"><div><div class="eyebrow">Left to spend</div><div class="big ${c.left < 0 ? 'red' : ''}">${countM(c.left)}</div></div><span class="pill ${status[0]}"><i></i>${status[1]}</span></div>
-      <div class="bar ${c.tone}"><b data-w="${Math.min(100, c.pct * 100)}"></b><span class="tick" style="left:calc(${(c.elapsed * 100).toFixed(1)}% - 1px)"></span></div>
-      <div class="goal-meta"><span><b>${Math.round(c.pct * 100)}%</b> spent</span><span>Day ${Math.round(c.elapsed * 7)} of 7</span></div>
-      <div class="trio"><div class="stat"><div class="k">Budget</div><div class="v">${fmt0(c.budget)}</div></div><div class="stat"><div class="k">Spent</div><div class="v">${fmt(c.spent)}</div></div><div class="stat"><div class="k">Left</div><div class="v" style="color:${c.left < 0 ? '#ff8792' : 'var(--mint)'}">${fmt(c.left)}</div></div></div>
-      ${w.budget_breakdown ? `<div class="formula">${w.budget_breakdown.map((b, i) => `<span>${i ? (b.amount < 0 ? '− ' : '+ ') : ''}${esc(b.label)} <b>${smart(Math.abs(b.amount))}</b></span>`).join('')}<span>= <b>${fmt0(c.budget)}</b></span></div>` : ''}
-    </div>
-    <div class="card allow"><div class="ico">${ic('clock')}</div><div class="mid"><div class="v money">${c.daysLeft ? moneyHTML(c.perDay) : '$0'}<span style="font-size:14px;color:var(--dim);font-family:var(--body);font-weight:500;letter-spacing:0"> / day</span></div>
-      <div class="s">${c.daysLeft ? `for the next ${c.daysLeft} day${c.daysLeft > 1 ? 's' : ''} · new week ${esc(wdShort(isoOf(dn(w.end) + 1)))}` : 'Week is over — fresh budget on payday'}</div></div></div>
+  let h = `<div><div class="eyebrow">Food & fun · Wed–Tue</div><h1 class="h-title">This week</h1><div class="h-sub">${esc(wdShort(w.start))} – ${esc(wdShort(w.end))} · Day ${Math.max(1, Math.round(c.elapsed * 7))} of 7</div></div>
+    ${budgetCard(c.food, c)}${budgetCard(c.fun, c)}
+    <div class="card pad-s split"><div class="split-h"><span class="eyebrow">Weekly spending money</span><span class="money">${smart(c.total)}</span></div>
+      ${w.budget_breakdown ? `<div class="formula">${w.budget_breakdown.map((b, i) => `<span>${i ? (b.amount < 0 ? '− ' : '+ ') : ''}${esc(b.label)} <b>${smart(Math.abs(b.amount))}</b></span>`).join('')}</div>` : ''}
+      <div class="split-bar"><i class="f" style="flex:${c.food.budget}"></i><i class="u" style="flex:${Math.max(0.01, c.fun.budget)}"></i></div>
+      <div class="split-l"><span><i class="f"></i>Food ${Math.round(c.split.food * 100)}% · <b>${smart(c.food.budget)}</b></span><span><i class="u"></i>Fun ${Math.round(c.split.fun * 100)}% · <b>${smart(c.fun.budget)}</b></span></div></div>
     <button class="btn mint block" data-action="cash">${ic('plus')}I spent cash</button>`;
-  const items = [...(w.purchases || []), ...c.cash.map(x => ({ ...x, merchant: x.note || (x.cat === 'fun' ? 'Cash · fun' : 'Cash · food'), note: x.note ? 'Cash · this phone' : 'This phone', category: x.cat, cash: true }))]
-    .sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
-  h += `<div class="sec-h"><h3>This week's purchases</h3><span>${items.length} · ${fmt(c.spent)}</span></div>
-    <div class="card list">${items.length ? items.map(purchaseRow).join('') : '<div class="empty">Nothing yet this week 🎉</div>'}</div>`;
+  for (const b of [c.food, c.fun]) {
+    const name = b.key === 'food' ? 'Food' : 'Fun';
+    h += `<div class="sec-h"><h3>${name} this week</h3><span>${b.items.length} · ${fmt(b.spent)}</span></div>
+      <div class="card list">${b.items.length ? b.items.map(purchaseRow).join('') : `<div class="empty">No ${name.toLowerCase()} spending yet 🎉</div>`}</div>`;
+  }
   return h;
 }
 
-function upcomingBills() {
-  const b = (D().bills || {}).upcoming || [];
-  return [...b].sort((x, y) => (x.date ? 0 : 1) - (y.date ? 0 : 1) || String(x.date).localeCompare(String(y.date)));
-}
-const fmtTotal = list => { const t = list.reduce((s, b) => s + (b.amount ? +b.amount : 0), 0); return `~${fmt0(t)}`; };
-function billRow(b) {
-  const tags = (b.tags || []).map(t => `<span class="tag ${esc(t.toLowerCase())}">${esc(t)}</span>`).join('');
+function billMini(b) {
   const d = b.date ? dn(b.date) - dn(todayISO()) : null;
-  const when = d == null ? '' : d < 0 ? 'past due?' : d === 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d}d`;
-  return `<div class="row"><div class="ico bills">${ic(b.icon || 'bills')}</div><div class="mid"><div class="t1"><span class="nm">${esc(b.name)}</span>${tags}</div>
+  const when = d == null ? '' : d < 0 ? `due ${shortDate(b.date)}` : d === 0 ? 'today' : d === 1 ? 'tomorrow' : `in ${d}d`;
+  return `<div class="row"><div class="ico bills">${ic(b.icon || 'bills')}</div><div class="mid"><div class="t1"><span class="nm">${esc(b.name)}</span>${(b.tags || []).map(t => `<span class="tag ${esc(t.toLowerCase())}">${esc(t)}</span>`).join('')}</div>
     <div class="t2">${esc(b.date_label || (b.date ? shortDate(b.date) : 'Date TBD'))}${b.note ? ' · ' + esc(b.note) : ''}</div></div>
     <div class="amt">${b.amount != null ? (b.approx ? '~' : '') + smart(+b.amount) : 'Varies'}${when ? `<small class="when ${d != null && d <= 3 ? 'soon' : ''}">${when}</small>` : ''}</div></div>`;
 }
+function billRow(b) {
+  const tags = (b.tags || []).map(t => `<span class="tag ${esc(t.toLowerCase())}">${esc(t)}</span>`).join('');
+  const d = b.date ? dn(b.date) - dn(todayISO()) : null;
+  let t2, amt, when = '', soon = false;
+  if (b.paid) {
+    const a = b.auto && b.auto.amount != null ? b.auto.amount : null;
+    t2 = b.auto && b.auto.date && !(b.key in paidMap()) ? `Paid ${shortDate(b.auto.date)} · seen in bank` : 'Marked paid';
+    amt = a != null ? fmt(a) : b.amount != null ? (b.approx ? '~' : '') + smart(+b.amount) : '—';
+  } else {
+    const label = d != null && d < 0 ? (b.match ? 'Not seen in bank yet' : `Was due ${shortDate(b.date)}`) : (b.date_label || (b.date ? shortDate(b.date) : 'Date TBD'));
+    t2 = label + (b.note ? ' · ' + b.note : '');
+    amt = b.amount != null ? (b.approx ? '~' : '') + smart(+b.amount) : 'Varies';
+    when = d == null ? '' : d < 0 ? `due ${shortDate(b.date)}` : d === 0 ? 'due today' : d === 1 ? 'tomorrow' : `in ${d}d`;
+    soon = d != null && d <= 3;
+  }
+  return `<div class="row bill ${b.paid ? 'is-paid' : ''} ${!b.paid && d != null && d < 0 ? 'late' : ''}" data-key="${esc(b.key)}">
+    <button class="chk ${b.paid ? 'on' : ''}" role="checkbox" aria-checked="${b.paid}" data-action="paid" data-key="${esc(b.key)}" aria-label="${b.paid ? 'Mark unpaid' : 'Mark paid'}: ${esc(b.name)}">${ic(b.icon || 'bills', 'bi')}${ic('check', 'ck')}</button>
+    <div class="mid"><div class="t1"><span class="nm">${esc(b.name)}</span>${tags}</div><div class="t2">${esc(t2)}</div></div>
+    <div class="amt">${esc(amt)}${when ? `<small class="when ${soon ? 'soon' : ''}">${esc(when)}</small>` : ''}</div></div>`;
+}
 function vBills() {
-  const bills = D().bills || {}, up = upcomingBills(), dated = up.filter(b => b.date), undated = up.filter(b => !b.date), can = bills.cancelled || [];
+  const bills = D().bills || {}, all = billInstances(), up = all.filter(b => !b.paid).sort(byDue), paid = all.filter(b => b.paid).sort(byDue), can = bills.cancelled || [];
+  const month = dfmt(`${todayISO().slice(0, 7)}-01`, { month: 'long' });
   const saved = can.reduce((s, c) => s + (+c.amount || 0), 0);
-  let h = `<div><div class="eyebrow">Money out</div><h1 class="h-title">Bills</h1></div>`;
+  let h = `<div><div class="eyebrow">Money out · ${esc(month)}</div><h1 class="h-title">Bills</h1></div>`;
   if (bills.weekly_reserve) h += `<div class="card reserve"><div class="ico">${ic('shield')}</div><div><div class="eyebrow">Weekly bill reserve</div>
     <div class="v money" style="margin-top:6px">${moneyHTML(+bills.weekly_reserve, { auto: true })}<small>/ week</small></div><div class="s">${esc(bills.reserve_note || 'Set aside every payday')}</div></div></div>`;
-  h += `<div class="sec-h"><h3>Upcoming</h3><span>${dated.length + undated.length} bills</span></div><div class="card list">${dated.map(billRow).join('')}
-    <div class="total-row" style="margin-bottom:${undated.length ? 0 : 12}px"><span>Scheduled total</span><span class="money">${esc(fmtTotal(dated))}</span></div></div>`;
-  if (undated.length) h += `<div class="sec-h"><h3>Date not set</h3><span>${esc(fmtTotal(undated))}</span></div><div class="card list">${undated.map(billRow).join('')}</div>`;
-  if (can.length) h += `<div class="sec-h"><h3>Cancelled</h3><span>${can.length} subscriptions</span></div>
-    <div class="card saved-hero"><div class="ico" style="background:rgba(62,240,176,.16);color:var(--mint);width:52px;height:52px;border-radius:17px">${ic('sparkle')}</div>
-      <div><div class="eyebrow">You're saving</div><div class="v money" style="margin-top:6px">~${moneyHTML(Math.round(saved), { cents: false })}<span style="font-size:15px;color:var(--dim);font-family:var(--body);font-weight:500;letter-spacing:0;text-shadow:none"> / month</span></div>
-      <div class="s">That's ~${fmt0(saved * 12)} a year back in your pocket</div></div></div>
-    <div class="card list">${can.map(c => `<div class="row"><div class="ico subs">${ic(c.icon || 'subs')}</div><div class="mid"><div class="t1"><span class="nm">${esc(c.name)}</span></div><div class="t2">${c.via ? 'via ' + esc(c.via) + ' · ' : ''}Cancelled</div></div>
-      <div class="amt strike">${fmt(+c.amount)}</div><span class="cancel-ok">${ic('check')}</span></div>`).join('')}</div>`;
+  const prog = all.length ? paid.length / all.length : 0;
+  h += `<div class="card pad-s bill-prog"><div class="bp-top"><span><b>${paid.length}</b> of ${all.length} paid in ${esc(month)}</span><span>~${esc(fmt0(billSum(up)))} still due</span></div>
+    <div class="bar"><b data-w="${prog * 100}"></b></div></div>`;
+  h += `<div class="sec-h"><h3>Upcoming</h3><span>${up.length ? `${up.length} · ~${esc(fmt0(billSum(up)))}` : 'All done'}</span></div>
+    <div class="card list" id="bills-up">${up.length ? up.map(billRow).join('') : `<div class="empty">All of ${esc(month)}'s bills are paid 🎉</div>`}</div>`;
+  h += `<div class="sec-h"><h3>Paid</h3><span>${paid.length ? `${paid.length} · ${esc(fmt(billSum(paid)))}` : 'Tap a circle when you pay'}</span></div>
+    <div class="card list paid-list" id="bills-paid">${paid.length ? paid.map(billRow).join('') : `<div class="empty">Nothing paid yet this month.</div>`}</div>`;
+  if (can.length) h += `<div class="card list cancelled ${S.showCancelled ? 'open' : ''}"><button class="cancel-toggle" data-action="toggle-cancelled" aria-expanded="${S.showCancelled}">
+      <span class="mid"><span class="t1">Cancelled subscriptions</span><span class="t2">${can.length} cancelled · saves ~${fmt0(saved)}/mo (~${fmt0(saved * 12)}/yr)</span></span>
+      <svg class="chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg></button>
+    ${S.showCancelled ? can.map(c => `<div class="row"><div class="ico subs">${ic(c.icon || 'subs')}</div><div class="mid"><div class="t1"><span class="nm">${esc(c.name)}</span></div><div class="t2">${c.via ? 'via ' + esc(c.via) + ' · ' : ''}Cancelled</div></div>
+      <div class="amt strike">${fmt(+c.amount)}</div></div>`).join('') : ''}</div>`;
   return h;
 }
 
 function vActivity() {
   const d = D(), f = FILTERS.find(x => x[0] === S.filter) || FILTERS[0];
-  const cash = cashEntries().map(x => ({ date: x.date, merchant: x.note || 'Cash spend', amount: -x.amount, category: x.cat, cashLocal: true }));
+  const cash = cashEntries().map(x => ({ date: x.date, merchant: x.note || 'Cash spend', amount: -x.amount, category: x.cat === 'fun' ? 'fun' : 'food', cashLocal: true }));
   let tx = [...cash, ...(d.transactions || [])];
   if (f[2]) tx = tx.filter(t => f[2].includes(t.category));
   tx.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
@@ -408,14 +483,14 @@ function openSheet(html, onMount) {
 function closeSheet(now) {
   const o = $('#sheet-root .overlay'); if (!o) return;
   if (now) return o.remove();
-  o.classList.add('out'); setTimeout(() => o.remove(), 240);
+  o.classList.add('out'); setTimeout(() => { o.remove(); if (S.pendingReload) location.reload(); }, 240);
 }
-function cashSheet() {
-  let cat = 'food';
-  openSheet(`<h2>I spent cash</h2><p class="sub">Comes out of this week's food & fun. Saved only on this phone.</p>
+function cashSheet(preset) {
+  let cat = preset === 'fun' ? 'fun' : 'food';
+  openSheet(`<h2>I spent cash</h2><p class="sub">Was it food or fun? It comes out of that budget this week. Saved only on this phone.</p>
     <div class="amt-in"><span>$</span><input id="cash-amt" type="text" inputmode="decimal" placeholder="0" autocomplete="off" aria-label="Amount"></div>
     <div class="quick">${[5, 10, 20, 40].map(v => `<button data-q="${v}">$${v}</button>`).join('')}</div>
-    <div class="seg"><button class="on" data-c="food">Food</button><button data-c="fun">Fun</button></div>
+    <div class="seg" role="radiogroup" aria-label="Food or fun"><button class="${cat === 'food' ? 'on' : ''}" data-c="food" role="radio" aria-checked="${cat === 'food'}">${ic('food')}Food</button><button class="${cat === 'fun' ? 'on' : ''}" data-c="fun" role="radio" aria-checked="${cat === 'fun'}">${ic('fun')}Fun</button></div>
     <input class="text-in" id="cash-note" type="text" placeholder="What was it? (optional)" maxlength="40" autocomplete="off">
     <button class="btn mint block" id="cash-save">Log cash</button>`, o => {
     const amt = $('#cash-amt', o);
@@ -423,7 +498,7 @@ function cashSheet() {
     fit(); amt.addEventListener('input', fit);
     setTimeout(() => amt.focus(), 350);
     o.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { amt.value = b.dataset.q; fit(); haptic(); });
-    o.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { cat = b.dataset.c; o.querySelectorAll('[data-c]').forEach(x => x.classList.toggle('on', x === b)); haptic(); });
+    o.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { cat = b.dataset.c; o.querySelectorAll('[data-c]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); }); haptic(); });
     $('#cash-save', o).onclick = () => {
       const v = Math.round(parseFloat((amt.value || '').replace(/[^0-9.]/g, '')) * 100) / 100;
       if (!(v > 0 && v < 10000)) { amt.parentElement.classList.remove('pop'); void amt.offsetWidth; amt.parentElement.classList.add('pop'); haptic(25); amt.focus(); return; }
@@ -431,7 +506,7 @@ function cashSheet() {
       all.push({ id: Date.now().toString(36), amount: v, note: $('#cash-note', o).value.trim(), cat, date: todayISO(), week: D().week.start });
       localStorage.setItem(K_CASH, JSON.stringify(all.slice(-200)));
       closeSheet(); haptic(12); render(false);
-      toast(`Logged ${fmt(v)} cash · ${fmt(weekCalc().left)} left this week`);
+      const wb = weekCalc()[cat]; toast(`Logged ${fmt(v)} cash · ${cat === 'fun' ? 'Fun' : 'Food'} left ${fmt(wb.left)}`);
     };
   });
 }
@@ -460,6 +535,30 @@ async function refresh(manual) {
   finally { up.classList.remove('loading'); }
 }
 
+/* ---------------- paid toggles (FLIP animation between Upcoming and Paid) ---------------- */
+function togglePaid(btn) {
+  const key = btn.dataset.key, b = billInstances().find(x => x.key === key); if (!b || S.flipping) return;
+  const val = !b.paid; S.flipping = true; haptic(val ? 14 : 8);
+  btn.classList.toggle('on', val); btn.setAttribute('aria-checked', val); btn.classList.add('tapped');
+  setTimeout(() => {
+    setPaid(key, val, !!b.auto);
+    const before = {}; document.querySelectorAll('.bill[data-key]').forEach(el => before[el.dataset.key] = el.getBoundingClientRect().top);
+    render(false);
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    document.querySelectorAll('.bill[data-key]').forEach(el => {
+      const t0 = before[el.dataset.key]; if (t0 == null || reduce) return;
+      const dy = t0 - el.getBoundingClientRect().top; if (Math.abs(dy) < 1) return;
+      const moving = el.dataset.key === key;
+      if (moving) { el.style.position = 'relative'; el.style.zIndex = 3; el.classList.add('moving'); }
+      const an = el.animate(moving ? [{ transform: `translateY(${dy}px) scale(1.03)` }, { transform: `translateY(${dy * 0.15}px) scale(1.03)`, offset: 0.7 }, { transform: 'none' }]
+        : [{ transform: `translateY(${dy}px)` }, { transform: 'none' }], { duration: moving ? 620 : 480, easing: 'cubic-bezier(.2,.9,.25,1)' });
+      an.onfinish = () => { el.style.zIndex = ''; el.classList.remove('moving'); };
+    });
+    toast(val ? `${b.name} marked paid` : `${b.name} moved back to upcoming`);
+    setTimeout(() => { S.flipping = false; }, 300);
+  }, 220);
+}
+
 /* ---------------- events & boot ---------------- */
 function startApp() {
   $('#lock').hidden = true; $('#app').hidden = false;
@@ -470,11 +569,13 @@ function startApp() {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]'); if (!el) return;
   const a = el.dataset.action;
-  if (a === 'cash' || a === 'tip' || a === 'del-cash') e.stopPropagation();
+  if (a === 'cash' || a === 'tip' || a === 'del-cash' || a === 'paid') e.stopPropagation();
   if (a === 'nav') { const t = el.dataset.tab; haptic(); closeSheet(true); if (t === S.tab) { $('#main').scrollTo({ top: 0, behavior: 'smooth' }); return; }
     S.tab = t; sessionStorage.setItem(K_TAB, t); $('#main').scrollTop = 0; render(true); }
   else if (a === 'filter') { S.filter = el.dataset.f; haptic(); const sc = $('.filters').scrollLeft; render(false); $('.filters').scrollLeft = sc; }
-  else if (a === 'cash') { haptic(); cashSheet(); }
+  else if (a === 'cash') { haptic(); cashSheet(el.dataset.b); }
+  else if (a === 'paid') togglePaid(el);
+  else if (a === 'toggle-cancelled') { S.showCancelled = !S.showCancelled; haptic(); render(false); }
   else if (a === 'del-cash') {
     let all = []; try { all = JSON.parse(localStorage.getItem(K_CASH) || '[]'); } catch (x) {}
     localStorage.setItem(K_CASH, JSON.stringify(all.filter(c => c.id !== el.dataset.id))); haptic(); render(false); toast('Cash entry removed');
@@ -488,10 +589,23 @@ $('#main').addEventListener('scroll', () => $('#topbar').classList.toggle('scrol
 $('#lock-form').addEventListener('submit', onUnlock);
 $('#eye').addEventListener('click', () => { const p = $('#pass'), on = p.type === 'password'; p.type = on ? 'text' : 'password'; $('#eye').classList.toggle('on', on); });
 $('#pass').addEventListener('input', () => { $('#field').classList.remove('bad'); $('#lock-err').textContent = ''; });
-document.addEventListener('visibilitychange', () => { if (!document.hidden && S.data && Date.now() - S.lastFetch > 5 * 60e3) refresh(false); });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) return;
+  if (S.reg) S.reg.update().catch(() => {});
+  if (S.data && Date.now() - S.lastFetch > 5 * 60e3) refresh(false);
+  else if (S.data && S.tab === 'bills') render(false);  // month may have rolled over
+});
 
 async function boot() {
-  if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => {});
+  if ('serviceWorker' in navigator) {
+    // When a new version (new cache name) takes over, reload once so the installed app shows the new shell right away.
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController || S.reloading) return; S.reloading = true;
+      if ($('#sheet-root .overlay')) S.pendingReload = true; else location.reload();
+    });
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => { S.reg = r; }).catch(() => {});
+  }
   try { S.env = await fetchEnv(); } catch (e) { return showLock("Can't reach MoneyMan right now. Connect to the internet and try again."); }
   const k = savedKey(S.env);
   if (k) {
@@ -502,6 +616,6 @@ async function boot() {
   }
   showLock();
 }
-window.__MM = { S, render, goalCalc, weekCalc, todayISO };
+window.__MM = { S, render, goalCalc, weekCalc, todayISO, billInstances };
 boot();
 })();

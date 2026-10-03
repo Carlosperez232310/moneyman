@@ -5,26 +5,31 @@ id,date,acct,amount,name,merchant,cat,pending format) into MoneyMan `transaction
   tools/finance_csv_to_tx.py tx.csv [more.csv ...] --acct <account_id_or_code>=<last4> ... [--label <last4>=Savings] [--since 2026-09-01]
 
 Merchant names are cleaned, card/account numbers are reduced to last-4, and each row gets a MoneyMan category:
-food, groceries, fun, subs, shopping, gas, bills, income, transfer, cash, fees, other.
+food, groceries, fun, subs, shopping, gas, bills, income, transfer, cash, fees, other
+(app weekly buckets: Food = food + groceries, Fun = fun + shopping).
 Output is sorted newest first and de-duplicated by id. Never commit the CSV inputs."""
 import csv, json, sys, re, argparse, hashlib
 
 LABELS = {}  # last4 -> friendly account label, filled from --label
 SUBS = ('spotify', 'play books', 'paramount', 'apple', 'microsoft', 'youtube', 'amazon prime', 'netflix', 'hulu', 'disney')
+GROCERS = ('safeway', 'fred meyer', 'winco', 'kroger', 'albertsons', 'trader joe', 'grocery outlet', 'costco', 'whole foods', 'qfc')
+DIGITAL = ('google', 'steam', 'xbox', 'playstation', 'nintendo', 'epic games', 'roblox', 'itunes', 'fandango', 'cinema', 'theater', 'regal', 'amc')
 
 def category(cat, merchant, amount):
+    """MoneyMan categories. Weekly buckets in the app: Food = food + groceries; Fun = fun + shopping."""
     c = (cat or '').upper(); m = merchant.lower()
     if c.startswith('INCOME'): return 'income'
     if c == 'TRANSFER_OUT_WITHDRAWAL': return 'cash'
     if c.startswith('TRANSFER'): return 'transfer'
     if c.startswith('BANK_FEES'): return 'fees'
     if any(s in m for s in SUBS): return 'subs'
-    if c == 'FOOD_AND_DRINK_GROCERIES': return 'groceries'
-    if c.startswith('FOOD_AND_DRINK'): return 'food'
-    if c.startswith('ENTERTAINMENT'): return 'fun'
-    if c.startswith('TRANSPORTATION_GAS'): return 'gas'
     if c.startswith(('RENT_AND_UTILITIES', 'LOAN_PAYMENTS', 'GENERAL_SERVICES_INSURANCE')): return 'bills'
-    if c.startswith('GENERAL_MERCHANDISE'): return 'shopping'
+    if c.startswith('TRANSPORTATION_GAS'): return 'gas'
+    if c == 'FOOD_AND_DRINK_GROCERIES' or any(g in m for g in GROCERS): return 'groceries'
+    if c == 'GENERAL_MERCHANDISE_CONVENIENCE_STORES': return 'groceries'      # convenience-store snacks/food
+    if c.startswith('FOOD_AND_DRINK') or 'doordash' in m: return 'food'
+    if c.startswith('ENTERTAINMENT') or any(g in m for g in DIGITAL): return 'fun'
+    if c.startswith('GENERAL_MERCHANDISE'): return 'shopping'                # other discretionary -> Fun bucket
     return 'other' if amount < 0 else 'income'
 
 def clean(name, merchant, cat, amount, last4):

@@ -1,0 +1,9 @@
+# secrets & private data — never commit
+.passcode
+private/
+*.csv
+data.json
+public/
+screenshots/
+__pycache__/
+node_modules/

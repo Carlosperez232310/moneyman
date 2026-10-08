@@ -4,7 +4,7 @@
 'use strict';
 const VER = '__VER__';
 const TZ = 'America/Los_Angeles';
-const K_KEY = 'moneyman.key.v1', K_CASH = 'moneyman.cash.v1', K_TIP = 'moneyman.tip.v1', K_TAB = 'moneyman.tab.v1', K_PAID = 'moneyman.paid.v1';
+const K_KEY = 'moneyman.key.v1', K_CASH = 'moneyman.cash.v1', K_TIP = 'moneyman.tip.v1', K_TAB = 'moneyman.tab.v1', K_PAID = 'moneyman.paid.v1', K_TOAST = 'moneyman.toast.v1';
 const $ = (s, r = document) => r.querySelector(s);
 const enc = new TextEncoder(), dec = new TextDecoder();
 const S = { env: null, key: null, data: null, tab: 'home', filter: 'all', lastFetch: 0, animate: true, showCancelled: false };
@@ -87,6 +87,39 @@ function updatedLabel(ts) {
   const iso = `${p.year}-${p.month}-${p.day}`, rel = dn(todayISO()) - dn(iso);
   return `Updated ${rel === 0 ? '' : rel === 1 ? 'yesterday ' : shortDate(iso) + ', '}${t} PT`;
 }
+/* ---------------- data schedule (all in America/Los_Angeles) ----------------
+   The routine re-encrypts and republishes data.enc.json at 9:02 AM and 9:02 PM PT, and the 4:14 PM PT daily check-in
+   refreshes it too. The bank (via Plaid) itself only syncs new transactions about once a day, late evening (~10:50 PM PT). */
+const SCHEDULE = [[9, 2], [16, 14], [21, 2]];
+const PENDING_MS = 30 * 60e3, EARLY_MS = 10 * 60e3;   // a run counts as "landing now" for 30 min; data up to 10 min early counts for it
+const BANK_NOTE = 'New bank purchases can take until the next day to show up (the bank syncs about once a day, late evening).';
+const ptISO = ms => { const p = ptParts(new Date(ms)); return `${p.year}-${p.month}-${p.day}`; };
+function ptOffsetMin(ms) { // PT minus UTC in minutes at instant ms (-420 in PDT, -480 in PST)
+  const p = ptParts(new Date(ms));
+  return Math.round((Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute) - Math.floor(ms / 60e3) * 60e3) / 60e3);
+}
+function ptEpoch(iso, h, m) { // wall-clock time h:m on PT date iso -> epoch ms (DST-safe)
+  const [y, mo, d] = iso.split('-').map(Number), wall = Date.UTC(y, mo - 1, d, h, m);
+  return wall - ptOffsetMin(wall - ptOffsetMin(wall) * 60e3) * 60e3;
+}
+function nextUpdate(now = Date.now(), gen) { // -> {at: epoch ms of the next scheduled refresh, pending: that run is due right now}
+  const d0 = dn(ptISO(now)), slots = [];
+  for (let k = -1; k <= 2; k++) for (const [h, m] of SCHEDULE) slots.push(ptEpoch(isoOf(d0 + k), h, m));
+  const g = new Date(gen).getTime(), last = slots.filter(s => s <= now).pop();
+  if (last != null && now - last < PENDING_MS && !(g >= last - EARLY_MS)) return { at: last, pending: true };
+  return { at: slots.find(s => s > now), pending: false };
+}
+const tfmt = ms => new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' }).format(new Date(ms)).replace(/\s/g, ' ');
+function whenPT(ts, now = Date.now()) { // "4:19 PM PT", "yesterday 9:02 PM PT", "tomorrow 9:02 AM PT", "Oct 5, 9:02 PM PT"
+  const ms = new Date(ts).getTime(); if (isNaN(ms)) return 'an unknown time';
+  const rel = dn(ptISO(ms)) - dn(ptISO(now));
+  return `${rel === 0 ? '' : rel === -1 ? 'yesterday ' : rel === 1 ? 'tomorrow ' : shortDate(ptISO(ms)) + ', '}${tfmt(ms)} PT`;
+}
+const nextLabel = (gen, now = Date.now()) => { const n = nextUpdate(now, gen); return n.pending ? `Next update due now (${tfmt(n.at)} PT run)` : `Next update ~${whenPT(n.at, now)}`; };
+function newestMsg(gen, now = Date.now()) {
+  const n = nextUpdate(now, gen);
+  return `This is the newest data (from ${whenPT(gen, now)}). ` + (n.pending ? `The ${tfmt(n.at)} PT update should land in a few minutes.` : `Next update around ${whenPT(n.at, now)}.`);
+}
 const haptic = (ms = 8) => { try { navigator.vibrate && navigator.vibrate(ms); } catch (e) {} };
 
 /* ---------------- crypto ---------------- */
@@ -106,11 +139,15 @@ function savedKey(env) {
   try { const s = JSON.parse(localStorage.getItem(K_KEY) || 'null'); if (s && s.salt === env.kdf.salt && s.iter === env.kdf.iterations) return s.k; } catch (e) {}
   return null;
 }
-async function fetchEnv() {
-  const r = await fetch('data.enc.json?t=' + Date.now(), { cache: 'no-store' });
+async function fetchEnv(fresh) {
+  // no-store + a unique query defeats the browser cache and GitHub Pages' max-age=600; "fresh" tells the service worker
+  // never to answer with its cached copy (a background load may get the offline copy, flagged X-MM-Source: cache).
+  const r = await fetch('data.enc.json?t=' + Date.now() + (fresh ? '&fresh=1' : ''), { cache: 'no-store' });
   if (!r.ok) throw new Error('offline');
   const env = await r.json(); if (!env.ct) throw new Error('bad data');
-  S.lastFetch = Date.now(); return env;
+  S.fromCache = r.headers.get('X-MM-Source') === 'cache';
+  if (!S.fromCache) S.lastFetch = Date.now();
+  return env;
 }
 
 /* ---------------- lock screen ---------------- */
@@ -284,6 +321,7 @@ function vHome() {
   const up = unpaidBills().filter(b => b.date);
   if (up.length) h += `<div class="sec-h"><h3>Coming up</h3><span>~${esc(fmt0(billSum(unpaidBills())))} left this month</span></div>
     <div class="card list pressable" data-action="nav" data-tab="bills">${up.slice(0, 2).map(billMini).join('')}</div>`;
+  h += `<p class="sched-note">${ic('clock')}<span>${esc(nextLabel(d.generated_at))} · new bank purchases can take until the next day to show up.</span></p>`;
   if (ios && !standalone && !localStorage.getItem(K_TIP)) h += `<div class="card install"><div class="mid">Install: tap <b>Share</b> then <b>Add to Home Screen</b> to open MoneyMan like an app.</div><button class="del x" data-action="tip" aria-label="Dismiss">${ic('x')}</button></div>`;
   return h;
 }
@@ -444,8 +482,9 @@ function render(anim = true) {
   scr.innerHTML = VIEWS[S.tab]();
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === S.tab));
   $('.tab-ind').style.setProperty('--i', tabs.indexOf(S.tab));
-  const up = $('#updated'); up.querySelector('span').textContent = updatedLabel(D().generated_at);
-  up.classList.toggle('stale', Date.now() - new Date(D().generated_at) > 36 * 3600e3);
+  const up = $('#updated'), gen = D().generated_at; up.querySelector('span').textContent = updatedLabel(gen).replace(/^Updated yesterday /, 'Yesterday, ').replace(/^Updated (?=[A-Z][a-z]{2} \d)/, '');
+  up.classList.toggle('stale', Date.now() - new Date(gen) > 36 * 3600e3);
+  up.title = `${updatedLabel(gen)} · ${nextLabel(gen)}. ${BANK_NOTE}`;
   requestAnimationFrame(() => requestAnimationFrame(() => {
     scr.querySelectorAll('[data-off]').forEach(c => c.style.strokeDashoffset = anim ? c.dataset.off : c.dataset.off);
     scr.querySelectorAll('[data-w]').forEach(b => b.style.width = Math.max(1.5, +b.dataset.w) + '%');
@@ -470,9 +509,9 @@ function countUp(root) {
 }
 
 /* ---------------- sheets & toasts ---------------- */
-function toast(msg) {
-  const t = document.createElement('div'); t.className = 'toast'; t.innerHTML = `<i></i><span>${esc(msg)}</span>`;
-  $('#toasts').appendChild(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, 2600);
+function toast(msg, ms = 2600, tone = '') {
+  const t = document.createElement('div'); t.className = 'toast' + (tone ? ' ' + tone : ''); t.innerHTML = `<i></i><span>${esc(msg)}</span>`;
+  $('#toasts').appendChild(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, ms);
 }
 function openSheet(html, onMount) {
   closeSheet(true);
@@ -512,28 +551,72 @@ function cashSheet(preset) {
   });
 }
 function menuSheet() {
-  openSheet(`<h2>MoneyMan</h2><p class="sub">${esc(updatedLabel(D().generated_at))} · data refreshes daily</p>
-    <button class="menu-row" data-action="refresh"><span class="ico subs">${ic('refresh')}</span><span class="mid">Refresh now<small>Fetch the latest encrypted data</small></span></button>
+  const gen = D().generated_at;
+  openSheet(`<h2>MoneyMan</h2><p class="sub" id="menu-sched">${esc(updatedLabel(gen))}<br>${esc(nextLabel(gen))}</p>
+    <button class="menu-row" data-action="refresh"><span class="ico subs">${ic('refresh')}</span><span class="mid">Refresh now<small>Check for newer data and app updates</small></span></button>
     <button class="menu-row" data-action="lock"><span class="ico fun">${ic('lock')}</span><span class="mid">Lock & forget this device<small>You'll need the passcode next time</small></span></button>
+    <p class="menu-note">${ic('clock')}<span>Data updates around 9:02 AM, 4:14 PM and 9:02 PM PT. ${esc(BANK_NOTE)}</span></p>
     <p class="sub" style="margin:14px 0 0;font-size:12px">Version ${esc(VER)} · AES-256-GCM · PBKDF2 ${((S.env && S.env.kdf.iterations) || 0).toLocaleString()}×</p>`);
 }
 
 /* ---------------- data refresh ---------------- */
 async function refresh(manual) {
+  if (S.refreshing && !manual) return; S.refreshing = true;
   const up = $('#updated'); up.classList.add('loading');
+  if (manual) { S.holdReload = true; S.swChanged = false; }   // a new version taking over mid-refresh reloads after the message is ready
+  const appUpdate = manual ? checkAppUpdate() : null, t0 = Date.now();
+  let msg, tone = '';
   try {
-    const env = await fetchEnv();
+    const env = await fetchEnv(manual);
+    if (S.fromCache) throw new Error('offline');   // service worker fell back to its stored copy
+    const before = S.data && S.data.generated_at;
     if (env.ct !== (S.env && S.env.ct)) {
       let key = S.key;
       if (env.kdf.salt !== S.env.kdf.salt || env.kdf.iterations !== S.env.kdf.iterations) {
         const k = savedKey(env); key = k ? await crypto.subtle.importKey('raw', b64d(k), 'AES-GCM', true, ['decrypt']) : null;
       }
-      if (!key) { S.env = env; S.key = null; S.data = null; return showLock('Data was re-keyed — enter your passcode.'); }
-      S.data = await decryptEnv(key, env); S.env = env; S.key = key; render(false);
-      if (manual) toast('Fresh data loaded');
-    } else if (manual) toast('Already up to date');
-  } catch (e) { if (manual) toast("Offline — showing your last data"); }
-  finally { up.classList.remove('loading'); }
+      let data = null; if (key) { try { data = await decryptEnv(key, env); } catch (x) { data = null; } }
+      if (!data) { S.env = env; S.key = null; S.data = null; return showLock('Data was re-keyed — enter your passcode.'); }
+      S.data = data; S.env = env; S.key = key; render(false);
+      const newer = !before || new Date(data.generated_at) > new Date(before);
+      msg = newer ? `Updated with data from ${whenPT(data.generated_at)}` : newestMsg(data.generated_at);
+    } else msg = newestMsg(S.data.generated_at);
+  } catch (e) { msg = `Offline, showing data from ${whenPT(S.data && S.data.generated_at)}.`; tone = 'amber'; }
+  finally { S.refreshing = false; }
+  if (!manual) return up.classList.remove('loading');
+  await new Promise(r => setTimeout(r, Math.max(0, 500 - (Date.now() - t0))));   // let the tap register visibly
+  const w = await appUpdate;
+  up.classList.remove('loading'); S.holdReload = false;
+  if (S.swChanged || w) S.pendingToast = 'App updated · ' + msg;
+  if (S.swChanged) return reloadNow();
+  if (w) return activateWorker(w, msg, tone);
+  toast(msg, 5200, tone);
+}
+// Ask the browser to re-check sw.js now; returns the new worker if a new app version was found.
+async function checkAppUpdate() {
+  try {
+    const reg = S.reg || ('serviceWorker' in navigator ? await navigator.serviceWorker.getRegistration() : null);
+    if (!reg) return null;
+    await reg.update();
+    return reg.waiting || reg.installing || null;
+  } catch (e) { return null; }
+}
+function reloadNow() {
+  if (S.reloading) return; S.reloading = true;
+  if (S.pendingToast) sessionStorage.setItem(K_TOAST, S.pendingToast);
+  location.reload();
+}
+// Activate a waiting/installing worker and reload into the new version; the toast is shown after the reload.
+function activateWorker(w, msg, tone) {
+  let done = false;
+  const fail = () => { if (done || S.reloading) return; done = true; S.pendingToast = null; toast(msg, 5200, tone); };
+  const step = () => {
+    if (w.state === 'installed') w.postMessage('skipWaiting');
+    else if (w.state === 'activated') { done = true; reloadNow(); }
+    else if (w.state === 'redundant') fail();
+  };
+  w.addEventListener('statechange', step); step();
+  setTimeout(() => { if (w.state === 'activating' || w.state === 'activated') { done = true; reloadNow(); } else fail(); }, 10000);
 }
 
 /* ---------------- paid toggles (FLIP animation between Upcoming and Paid) ---------------- */
@@ -566,6 +649,8 @@ function startApp() {
   const t = new URLSearchParams(location.search).get('tab') || sessionStorage.getItem(K_TAB);
   if (t && VIEWS[t]) S.tab = t;
   render(true);
+  const pend = sessionStorage.getItem(K_TOAST);   // message from a Refresh that reloaded into a new app version
+  if (pend) { sessionStorage.removeItem(K_TOAST); setTimeout(() => toast(pend, 5200), 450); }
 }
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-action]'); if (!el) return;
@@ -602,8 +687,10 @@ async function boot() {
     // When a new version (new cache name) takes over, reload once so the installed app shows the new shell right away.
     const hadController = !!navigator.serviceWorker.controller;
     navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (!hadController || S.reloading) return; S.reloading = true;
-      if ($('#sheet-root .overlay')) S.pendingReload = true; else location.reload();
+      if (!hadController || S.reloading) return;
+      if (S.holdReload) { S.swChanged = true; return; }
+      if ($('#sheet-root .overlay')) { S.reloading = true; if (S.pendingToast) sessionStorage.setItem(K_TOAST, S.pendingToast); S.pendingReload = true; }
+      else reloadNow();
     });
     navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => { S.reg = r; }).catch(() => {});
   }
@@ -617,6 +704,6 @@ async function boot() {
   }
   showLock();
 }
-window.__MM = { S, render, goalCalc, weekCalc, todayISO, billInstances };
+window.__MM = { S, render, goalCalc, weekCalc, todayISO, billInstances, nextUpdate, whenPT, newestMsg, nextLabel, ptEpoch, refresh };
 boot();
 })();

@@ -82,7 +82,7 @@ svg{display:block}
 .updated .dot{width:7px;height:7px;border-radius:50%;background:var(--mint);box-shadow:0 0 8px var(--mint)}
 .updated.stale .dot{background:var(--amber);box-shadow:0 0 8px var(--amber)}
 .updated.loading .dot{animation:pulse 1s ease-in-out infinite}
-.icon-btn{width:44px;height:44px;display:grid;place-items:center;border-radius:14px;color:var(--dim)}
+.icon-btn{flex:none;width:44px;height:44px;display:grid;place-items:center;border-radius:14px;color:var(--dim)}
 .icon-btn svg{width:22px;height:22px;fill:currentColor}
 .icon-btn:active{background:var(--card)}
 
@@ -422,3 +422,12 @@ svg{display:block}
 .cancelled .row{border-top:1px solid var(--line)}
 
 .row .amt small.when.soon{color:var(--amber)}
+/* ---------- data schedule notes ---------- */
+.sched-note,.menu-note{display:flex;gap:8px;align-items:flex-start;color:var(--dim2);font-size:12.5px;line-height:1.45;margin:2px 4px 0}
+.sched-note svg,.menu-note svg{width:15px;height:15px;flex:none;margin-top:1px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.menu-note{margin:12px 0 0;color:var(--dim)}
+.toast span{line-height:1.35}
+.toast.amber i{background:var(--amber);box-shadow:0 0 8px var(--amber)}
+.top-right{min-width:0}
+.updated{min-width:0}
+.updated span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}

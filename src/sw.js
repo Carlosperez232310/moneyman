@@ -14,13 +14,20 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request, url = new URL(req.url);
   if (req.method !== 'GET' || url.origin !== location.origin) return;
-  // Encrypted data: always try the network first (bypassing HTTP caches), fall back to the last good copy offline.
+  // Encrypted data: always go to the network (no-store + cache-busting query, which also beats GitHub Pages' max-age=600).
+  // Background loads fall back to the last good copy offline, marked "X-MM-Source: cache" so the app can say so.
+  // A manual Refresh (?fresh=1) never gets a cached copy: offline it gets a 503 and the app keeps what it shows.
   if (url.pathname.endsWith('/data.enc.json')) {
+    const fresh = url.searchParams.has('fresh');
+    const offline = () => new Response('{"error":"offline"}', {status: 503, headers: {'Content-Type': 'application/json', 'X-MM-Source': 'offline'}});
     e.respondWith(fetch(new Request(url.pathname + '?t=' + Date.now(), {cache: 'no-store'})).then(r => {
       if (r.ok) { const c = r.clone(); caches.open(DATA_CACHE).then(x => x.put('data.enc.json', c)); return r; }
       throw new Error('bad status ' + r.status);
-    }).catch(() => caches.open(DATA_CACHE).then(x => x.match('data.enc.json')).then(hit => hit ||
-      new Response('{"error":"offline"}', {status: 503, headers: {'Content-Type': 'application/json'}}))));
+    }).catch(() => fresh ? offline() : caches.open(DATA_CACHE).then(x => x.match('data.enc.json')).then(hit => {
+      if (!hit) return offline();
+      const h = new Headers(hit.headers); h.set('X-MM-Source', 'cache');
+      return new Response(hit.body, {status: 200, headers: h});
+    })));
     return;
   }
   if (req.mode === 'navigate') {

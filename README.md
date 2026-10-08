@@ -41,9 +41,15 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
   no clipped text, tap targets ≥ 38px, tab bar pinned; wrong-passcode error, unlock, all tabs, food/fun split + goal =
   savings balance, Food/Fun/Income filters, cash into Fun (Food untouched), bill auto-paid / check → Paid / persists /
   uncheck / next-month reset, remember-device reload, lock & forget. Saves screenshots (deviceScaleFactor 2) to `screenshots/`.
-- `tests/offline.py` — service worker: network-first data (new blob shows on next load), new build auto-installs and
-  reloads the open app, offline shell + last data, bill checkbox offline, manifest/apple-touch-icon.
-  Run: `python3 -m http.server 8766 --directory public` then `python3 tests/test_app.py && python3 tests/offline.py`
+  Also: menu/Home "Next update" line + bank note, and menu → Refresh toast ("This is the newest data …"), screenshot `<vp>-refresh.png`.
+- `tests/offline.py` — service worker: network-first data (new blob shows on next load), menu → Refresh loads a newer
+  blob in place ("Updated with data from …"), new build auto-installs and reloads the open app, Refresh finds a new
+  build → "App updated · …", offline shell + last data, offline Refresh → "Offline, showing data from …", bill checkbox
+  offline, manifest/apple-touch-icon.
+- `tests/test_schedule.py` — next-update math (9:02 AM / 4:14 PM / 9:02 PM PT, DST changes, browser in another zone) and
+  the exact Refresh messages.
+  Run: `python3 -m http.server 8766 --directory public` then
+  `python3 tests/test_schedule.py && python3 tests/test_app.py && python3 tests/offline.py`
   (pass `https://carlosperez232310.github.io/moneyman/` as an argument to run against the live site).
 
 ## Daily routine
@@ -53,8 +59,19 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
 2. Write the plain JSON to `/home/box/moneyman-app/private/data.json` (schema below; `private/build_data.py` is a template).
 3. Run: `tools/daily_update.sh /home/box/moneyman-app/private/data.json`
 
+Schedule (PT): the data routine republishes at **9:02 AM** and **9:02 PM**, and the **4:14 PM** daily check-in refreshes
+it too. The bank (OnPoint via Plaid) only syncs new transactions about once a day, late evening (~10:50 PM PT), so new
+purchases can take until the next day to appear; the app says so on Home and in the menu, and shows "Next update ~<time> PT"
+(computed in America/Los_Angeles, `SCHEDULE` in `src/js/app.js` — update it if the routine times change).
+
 The service worker serves the app shell cache-first but `data.enc.json` network-first (no-store + cache-busting
-query; offline falls back to the last good blob). Every build stamps a new cache name (`moneyman-<VER>`); the app
+query, which also beats GitHub Pages' `max-age=600`; offline, background loads fall back to the last good blob, marked
+`X-MM-Source: cache`). **Menu → Refresh** (or tapping the "Updated" pill) re-fetches with `?t=<now>&fresh=1` + `no-store`
+(the service worker never answers that with a cached copy), calls `registration.update()` and, if a new app version is
+waiting/installing, activates it and reloads. Messages: newer data → "Updated with data from 9:02 AM PT"; nothing newer →
+"This is the newest data (from 4:19 PM PT). Next update around 9:02 PM PT." (or "The 9:02 AM PT update should land in a
+few minutes." within 30 min after a scheduled run that hasn't arrived); no network → "Offline, showing data from <time> PT.";
+after a version update the message is prefixed "App updated · ". Every build stamps a new cache name (`moneyman-<VER>`); the app
 checks for a new `sw.js` on launch/resume and reloads itself once when the new version takes over, so the installed
 iPhone app picks up new shells automatically (versions before 2026-10-02 21:30 need one close + reopen). The app shows "Updated <time> PT" from `generated_at`
 (amber dot if older than 36 h) and re-fetches when reopened after 5+ minutes.

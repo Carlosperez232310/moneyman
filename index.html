@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>MoneyMan</title>
+<meta name="description" content="MoneyMan — private money tracker">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#06070c">
+<meta name="color-scheme" content="dark">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="MoneyMan">
+<meta name="format-detection" content="telephone=no">
+<meta name="referrer" content="no-referrer">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="preload" href="fonts/inter.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/sora.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="css/app.css?v=20261010090726">
+</head>
+<body>
+<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+
+<section id="lock" class="lock" hidden>
+  <form class="lock-card" id="lock-form" autocomplete="on" novalidate>
+    <div class="lock-icon"><img src="icons/icon-192.png" alt="" width="84" height="84"></div>
+    <h1 class="lock-title">MoneyMan</h1>
+    <p class="lock-sub">Your money, at a glance.<br>Enter your passcode to unlock.</p>
+    <input type="text" name="username" value="carlos" autocomplete="username" hidden>
+    <label class="field" id="field">
+      <svg class="field-ic" viewBox="0 0 24 24"><rect x="4" y="10.5" width="16" height="10.5" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/></svg>
+      <input id="pass" type="password" placeholder="word-word-word-00" autocomplete="current-password" autocapitalize="none" autocorrect="off" spellcheck="false" enterkeyhint="go" aria-label="Passcode">
+      <button type="button" class="eye" id="eye" aria-label="Show passcode"><svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg></button>
+    </label>
+    <label class="remember"><input type="checkbox" id="remember" checked><span class="switch"><i></i></span><span>Remember on this device</span></label>
+    <p class="lock-err" id="lock-err" role="alert"></p>
+    <button type="submit" class="btn-primary" id="unlock"><span class="lbl">Unlock</span><span class="spin"></span></button>
+    <p class="lock-foot"><svg viewBox="0 0 24 24"><path d="M12 2.8 4.5 5.6v5.6c0 4.8 3.2 8.6 7.5 10 4.3-1.4 7.5-5.2 7.5-10V5.6z"/></svg>Encrypted on GitHub · decrypted only on your phone</p>
+  </form>
+</section>
+
+<div id="app" hidden>
+  <header id="topbar">
+    <div class="brand"><img src="icons/icon-192.png" alt="" width="26" height="26"><span>MoneyMan</span></div>
+    <div class="top-right">
+      <button class="updated" id="updated" data-action="refresh" aria-label="Refresh data"><i class="dot"></i><span>Updated</span></button>
+      <button class="icon-btn" data-action="menu" aria-label="Menu"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
+    </div>
+  </header>
+  <main id="main"><div id="screen" class="screen"></div></main>
+  <nav id="tabbar">
+    <span class="tab-ind" aria-hidden="true"></span>
+    <button class="tab" data-action="nav" data-tab="home"><svg viewBox="0 0 24 24"><path d="M3.5 10.2 12 3.5l8.5 6.7V19a2 2 0 0 1-2 2h-4v-6h-5v6h-4a2 2 0 0 1-2-2z"/></svg><span>Home</span></button>
+    <button class="tab" data-action="nav" data-tab="goals"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/></svg><span>Goals</span></button>
+    <button class="tab" data-action="nav" data-tab="week"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M8 14h3"/></svg><span>Week</span></button>
+    <button class="tab" data-action="nav" data-tab="bills"><svg viewBox="0 0 24 24"><path d="M5 3h14v18l-2.3-1.5L14.3 21 12 19.5 9.7 21l-2.4-1.5L5 21z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>Bills</span></button>
+    <button class="tab" data-action="nav" data-tab="activity"><svg viewBox="0 0 24 24"><path d="M3 12h3.5l2.5-7 5 14 2.5-7H21"/></svg><span>Activity</span></button>
+  </nav>
+</div>
+<div id="sheet-root"></div>
+<div id="toasts" aria-live="polite"></div>
+<script src="js/app.js?v=20261010090726"></script>
+</body>
+</html>

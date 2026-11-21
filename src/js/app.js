@@ -13,6 +13,23 @@ const enc = new TextEncoder(), dec = new TextDecoder();
 const S = { env: null, key: null, data: null, tab: 'home', filter: 'all', q: '', weekIdx: 0, actView: 'list', lastFetch: 0, showCancelled: false, showPaid: false };
 const TABS = ['home', 'week', 'bills', 'activity', 'goals'];
 
+/* iOS home-screen apps (black-translucent status bar) report a layout viewport that is short by the top safe area,
+   leaving an empty strip under the tab bar. Pin the app to the real screen height instead. */
+(function fitIOSStandalone() {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent);
+  const sa = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+  if (!ios || !sa) return;
+  const root = document.documentElement;
+  root.classList.add('ios-pwa');
+  const fit = () => {
+    const land = Math.abs(window.orientation || 0) === 90 || innerWidth > innerHeight;
+    const h = land ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+    root.style.setProperty('--appH', Math.max(h, innerHeight) + 'px');
+  };
+  fit();
+  addEventListener('resize', fit); addEventListener('orientationchange', () => setTimeout(fit, 250));
+})();
+
 /* ---------------- icons ---------------- */
 const P = {
   food: '<path d="M4 3v7a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2V3M7 3v18M20 15V3a5 5 0 0 0-4 5v5a2 2 0 0 0 2 2h2zm0 0v6"/>',

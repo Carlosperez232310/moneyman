@@ -422,3 +422,7 @@ button.row:active{background:rgba(255,255,255,.03)}
 @keyframes shimmer{to{background-position:-200% 0}}
 @media (prefers-reduced-motion: reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 @media (min-width:600px){.screen{max-width:560px;margin:0 auto}.sheet{max-width:560px;margin:0 auto}}
+
+/* iOS home-screen app: fill the whole screen (see fitIOSStandalone in app.js) */
+html.ios-pwa,html.ios-pwa body{height:var(--appH,100%)}
+html.ios-pwa body,html.ios-pwa #app,html.ios-pwa .lock,html.ios-pwa .aurora,html.ios-pwa .overlay{top:0;bottom:auto;height:var(--appH,100%)}

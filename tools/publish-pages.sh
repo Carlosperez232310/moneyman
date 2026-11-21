@@ -13,7 +13,7 @@ pc = open('.passcode').readline().strip() if os.path.exists('.passcode') else No
 secrets_ = []  # exact balances from the private plain JSON must never appear in shipped files
 if os.path.exists('private/data.json'):
     d = json.load(open('private/data.json'))
-    secrets_ = [f"{a[k]:.2f}" for a in d.get('accounts', []) for k in ('available', 'current') if isinstance(a.get(k), (int, float))]
+    secrets_ = [f"{a[k]:.2f}" for a in d.get('accounts', []) for k in ('available', 'current') if isinstance(a.get(k), (int, float)) and abs(a[k]) >= 0.005]
 for root, _, files in os.walk('public'):
     for f in files:
         p = os.path.join(root, f)

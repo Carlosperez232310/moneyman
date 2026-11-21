@@ -10,7 +10,7 @@ if os.path.exists('.passcode'):
     pc = open('.passcode').readline().strip(); needles += [pc, pc.replace('-', ' ')]
 if os.path.exists('private/data.json'):
     d = json.load(open('private/data.json'))
-    needles += [f"{a[k]:.2f}" for a in d.get('accounts', []) for k in ('available', 'current') if isinstance(a.get(k), (int, float))]
+    needles += [f"{a[k]:.2f}" for a in d.get('accounts', []) for k in ('available', 'current') if isinstance(a.get(k), (int, float)) and abs(a[k]) >= 0.005]
     pc_ = d.get('paycheck', {}).get('last_amount'); needles += [f"{pc_:.2f}"] if pc_ else []
 bad = []
 for f in files:

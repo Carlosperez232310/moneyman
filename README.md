@@ -114,7 +114,7 @@ Money = numbers in dollars. Dates = ISO `YYYY-MM-DD` (Pacific). Unknown optional
               {"id": "phone", "name": "Phone", "amount": 80, "approx": true, "due_day": 1, "icon": "phone",
                "match": {"merchant": "phoneco", "min": 50, "max": 120}},   // auto-paid if the bank shows a payment
                                                                             // from due−7 days to month end
-              {"id": "rent", "name": "Rent", "amount": 900, "approx": true, "due_day": 15, "date_label": "Mid-month",
+              {"id": "rent", "name": "Rent", "amount": 650, "approx": true, "due_day": 31, "date_label": "End of month",
                "icon": "home", "tags": ["CASH"], "note": "Pay in cash"},
               {"id": "car-ins", "name": "Car insurance", "amount": 20, "due_day": 1, "tags": ["VARIES"],
                "paid": true, "paid_date": "2026-10-01", "paid_amount": 18.5, "paid_period": "2026-10"},  // data-side paid flag
@@ -140,3 +140,7 @@ Week math (per bucket): left = bucket budget − bucket purchases − this phone
 left ÷ days remaining (incl. today); bar turns orange above 80% and red when over; a tick marks today's pace.
 Bills math: paid = this phone's checkbox override, else `paid` flag in the data for this period, else a matching bank
 payment. Unpaid bills past their due date say "Not seen in bank yet · due Oct 1". New month = everything upcoming again.
+
+
+## Rent rule
+Rent (~$650 cash) is due on the 31st (month-end, clamped to the last day). Carlos funds it with ~$325 from each of the last two Wednesday paychecks of the month (Oct 2026: Oct 21 and Oct 28). Do not count rent in mid-month bills-due totals.

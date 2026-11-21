@@ -217,7 +217,7 @@ def rent_status(tx, today, cfg, checking_mask=None):
 
 
 # ---------------------------------------------------------------- savings & goal
-def savings_series(tx, balance_now, mask, since):
+def savings_series(tx, balance_now, mask, since, until=None):
     """Daily end-of-day savings balance reconstructed backwards from today's balance."""
     s = sorted([t for t in tx if t.get('account') == mask], key=lambda t: t['date'])
     by = defaultdict(float)
@@ -232,7 +232,7 @@ def savings_series(tx, balance_now, mask, since):
     start_bal = bal
     series, b = [], start_bal
     d = start
-    end = max([D(x) for x in days] + [start])
+    end = max([D(x) for x in days] + [start, until or start])
     while d <= end:
         iso = d.isoformat()
         if iso in pts:
@@ -367,7 +367,7 @@ def build(accounts, tx, cfg, today, now, connection=None, cash_flow_extra=None):
     days_left = (D(cur['end']) - today).days + 1
     # savings pace
     since = (today - dt.timedelta(days=56)).isoformat()
-    series = savings_series(tx, sav['current'], sav['mask'], min(t['date'] for t in tx) if tx else today.isoformat())
+    series = savings_series(tx, sav['current'], sav['mask'], min(t['date'] for t in tx) if tx else today.isoformat(), today)
     bal_8w = next((b for d, b in series if d >= since), series[0][1] if series else sav['current'])
     net_weekly = r2((sav['current'] - bal_8w) / 8)
     deposits = [t for t in tx if t.get('account') == chk.get('mask') and t['amount'] < 0 and t.get('category') == 'transfer'
@@ -406,10 +406,6 @@ def build(accounts, tx, cfg, today, now, connection=None, cash_flow_extra=None):
         wk = min(cf['cushion_weeks'], key=lambda w: w['running'])
         alerts.append({'id': f"cushion-{wk['payday']}", 'tone': 'amber', 'icon': 'calendar', 'title': f"Big bill week starting {D(wk['payday']).strftime('%b %-d')}",
                        'text': f"${wk['bills_out']:.0f} of bills and rent cash land that week but the reserve adds ${cfg['bills_reserve']}. Keep ${cf['cushion']:.0f} in checking for it."})
-    for h in holds:
-        if h['kind'] == 'checking':
-            alerts.append({'id': f"hold-{h['gap']}", 'tone': 'info', 'icon': 'clock', 'title': f"${h['gap']:.2f} on hold in checking",
-                           'text': f"Current balance is ${h['gap']:.2f} more than available: {h['why']}. Available is what you can spend."})
     od = [t for t in tx if t.get('od') and t.get('account') == chk.get('mask') and t['date'] >= (today - dt.timedelta(days=45)).isoformat()]
     if od:
         alerts.append({'id': f"od-{od[0]['date']}", 'tone': 'amber', 'icon': 'transfer', 'title': 'Overdraft protection pulled from savings',

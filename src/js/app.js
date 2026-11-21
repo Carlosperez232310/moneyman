@@ -415,7 +415,7 @@ function billRow(b) {
     t2 = isRent ? (b.sa ? `Cash · ${fmt0(b.sa.withdrawn)} of ${fmt0(b.sa.amount)} set aside` : 'Pay in cash')
       : late ? `Expected ${shortDate(b.post)} · not in the bank yet` : b.post !== b.date ? `Due ${ordinal(+b.due_day)} · usually posts ${shortDate(b.post)}` : `Due ${shortDate(b.date)}`;
     if (b.note && !isRent) t2 += ` · ${b.note}`;
-    amt = (b.approx ? '~' : '') + smart(+b.amount);
+    amt = isRent && b.sa ? (b.sa.left_to_set_aside > 0 ? `${fmt0(b.sa.left_to_set_aside)} to go` : 'Cash ready') : (b.approx ? '~' : '') + smart(+b.amount);
     when = late ? 'late' : dd === 0 ? 'today' : dd === 1 ? 'tomorrow' : `in ${dd}d`; soon = dd <= 3;
   }
   return `<div class="row bill ${b.paid ? 'is-paid' : ''} ${!b.paid && dd < 0 ? 'late' : ''}" data-key="${esc(b.key)}">
@@ -816,6 +816,7 @@ document.addEventListener('click', e => {
   else if (a === 'dismiss') { const d = dismissed(); d[el.dataset.id] = Date.now(); localStorage.setItem(K_DISMISS, JSON.stringify(d)); haptic(); const c = el.closest('.alert'); c.classList.add('gone'); setTimeout(() => render(false), 260); }
   else if (a === 'undismiss') { localStorage.removeItem(K_DISMISS); closeSheet(); render(false); toast('Alerts are back'); }
   else if (a === 'more-alerts') { S.allAlerts = !S.allAlerts; haptic(); render(false); }
+  else if (a === 'all-alerts') { S.allAlerts = true; haptic(); render(false); }
   else if (a === 'toggle-cancelled') { S.showCancelled = !S.showCancelled; haptic(); render(false); }
   else if (a === 'del-cash') {
     localStorage.setItem(K_CASH, JSON.stringify(cashAll().filter(c => c.id !== el.dataset.id))); haptic(); render(false); toast('Cash entry removed');

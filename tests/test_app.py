@@ -1,7 +1,8 @@
 """MoneyMan Playwright suite at 390x844 and 430x932 (simulated iPhone safe areas).
 Layout checks on every screen (no horizontal overflow, no clipped amounts, tap targets >= 38px, tab bar pinned) plus the
 flows: wrong passcode -> friendly error; unlock; Safe-to-spend hero equals the engine's number and opens its breakdown;
-week switcher; cash quick-add into Fun (Food untouched); bills tap-to-mark paid (persisted, moves to Paid, next-month
+week switcher; ONE weekly Spending budget (Home row, Week bucket, cash quick-add with no Food/Fun choice, old food/fun cash
+entries migrated into Spending); bills tap-to-mark paid (persisted, moves to Paid, next-month
 reset); Activity search + filters + transaction detail sheet; Insights; Goals projection; stale banner when data is old;
 remember-device reload; lock & forget. Screenshots (deviceScaleFactor 2) go to screenshots/<vp>-<name>.png.
 Run: python3 -m http.server 8766 --directory public  then  python3 tests/test_app.py [base_url]"""
@@ -84,30 +85,54 @@ async def run(w, h):
         check('SAFE TO SPEND' in hero.upper() and f"{sc['amount']:,.2f}".split('.')[0] in hero.replace('$', ''), f'hero shows safe amount: {hero[:80]!r}', tag)
         check('Bank synced' in txt and 'Next update' in txt, 'home shows bank sync + next update', tag)
         check('4:14' not in txt, 'no paused 4:14 PM schedule', tag)
+        rows = await page.locator('.week-card .bk-row').all_inner_texts()
+        check(len(rows) == 1 and 'Spending' in rows[0] and 'Fun' not in rows[0] and 'food + fun' not in txt.lower(), f'home week card = one Spending row: {rows!r}', tag)
+        hw = await page.evaluate("__MM.weekCalc(0)")
+        if PLAIN and PLAIN.get('week', {}).get('left'):
+            check(abs(hw['sp']['budget'] - PLAIN['week']['budgets']['spending']) < 0.01 and abs(hw['sp']['left'] - PLAIN['week']['left']['spending']) < 0.01,
+                  f"app spending {hw['sp']['budget']}/{hw['sp']['left']} != engine {PLAIN['week']['budgets']['spending']}/{PLAIN['week']['left']['spending']}", tag)
+        check(f"{hw['sp']['left']:,.2f}" in rows[0] if rows else False, 'home row shows spending left', tag)
         await layout(page, tag, 'home'); await shot(page, tag, 'home', bottom=True)
         await page.click('.hero'); await page.wait_for_selector('.sheet'); await page.wait_for_timeout(450)
         st = await page.inner_text('.sheet')
         check('Checking available' in st and 'Budget left' in st, f'safe sheet breakdown: {st[:60]!r}', tag)
+        check('spending budget' in st.lower() and 'food + fun' not in st.lower() and 'Fun left' not in st, 'safe sheet says spending budget', tag)
         await layout(page, tag, 'safe-sheet'); await shot(page, tag, 'safe-sheet')
         await page.click('.sheet-x'); await page.wait_for_timeout(400)
         # ---- tabs
         for t in TABS[1:]:
             await page.click(f'.tab[data-tab="{t}"]'); await page.wait_for_timeout(900)
             await layout(page, tag, t); await shot(page, tag, t, bottom=True)
-        # ---- week: switcher + cash into fun
+        # ---- week: one Spending bucket, switcher, cash into Spending, old food/fun cash migrated
         await page.click('.tab[data-tab="week"]'); await page.wait_for_timeout(700)
         w0 = await page.evaluate("__MM.weekCalc(0)")
+        check(await page.locator('.bucket').count() == 1 and await page.locator('.bucket.spending').count() == 1, 'week tab has one Spending bucket', tag)
+        wt = await page.inner_text('#screen')
+        check('Purchases' in wt and 'Food purchases' not in wt and 'Fun purchases' not in wt and 'Not part of food or fun' not in wt, 'week tab: one purchase list, no Food/Fun', tag)
+        check(len(w0['sp']['items']) == await page.locator('#screen .row.tx').count(), 'purchase list = all spending items', tag)
         await page.click('.sw-btn[data-d="1"]'); await page.wait_for_timeout(700)
         title = await page.text_content('.h-title'); check(title == 'Last week', f'switcher -> {title!r}', tag)
         await shot(page, tag, 'week-last'); await layout(page, tag, 'week-last')
         await page.click('.sw-btn[data-d="-1"]'); await page.wait_for_timeout(600)
         await page.click('button[data-action="cash"]'); await page.wait_for_selector('#cash-amt'); await page.wait_for_timeout(400)
-        await page.fill('#cash-amt', '7.5'); await page.click('.seg [data-c="fun"]'); await page.fill('#cash-note', 'Arcade')
+        cst = await page.inner_text('.sheet')
+        check(await page.locator('.sheet [data-c]').count() == 0 and 'Food' not in cst and 'Fun' not in cst and 'spending budget' in cst, 'cash sheet has no Food/Fun choice', tag)
+        await page.fill('#cash-amt', '7.5'); await page.fill('#cash-note', 'Arcade')
         await shot(page, tag, 'cash-sheet'); await page.click('#cash-save'); await page.wait_for_timeout(700)
         w1 = await page.evaluate("__MM.weekCalc(0)")
-        check(abs(w1['fun']['spent'] - w0['fun']['spent'] - 7.5) < 0.01 and abs(w1['food']['spent'] - w0['food']['spent']) < 0.01, 'cash went into Fun only', tag)
+        check(abs(w1['sp']['spent'] - w0['sp']['spent'] - 7.5) < 0.01 and abs(w1['sp']['left'] - (w0['sp']['left'] - 7.5)) < 0.01, 'cash counted toward Spending', tag)
+        tt = await page.text_content('.toast span'); check('Spending left' in (tt or ''), f'cash toast {tt!r}', tag)
         s1 = await page.evaluate("__MM.safeCalc()"); check(s1['amount'] <= sc['amount'] + 0.001, 'cash lowers or keeps safe-to-spend', tag)
         await page.click('[data-action="del-cash"]'); await page.wait_for_timeout(500)
+        # old phone data: cash entries tagged food / fun must migrate in place and still count
+        await page.evaluate('''(() => { const w = __MM.weekCalc(0).w; localStorage.setItem('moneyman.cash.v1', JSON.stringify([
+          { id: 'oldfood', amount: 3, note: 'Tacos', cat: 'food', date: w.start, week: w.start }, { id: 'oldfun', amount: 2, note: '', cat: 'fun', date: w.start, week: w.start }])); })()''')
+        await page.reload(); await page.wait_for_selector('#app:not([hidden])'); await page.wait_for_timeout(900)
+        mig = await page.evaluate("JSON.parse(localStorage.getItem('moneyman.cash.v1'))")
+        check([m['cat'] for m in mig] == ['spending', 'spending'] and [m.get('was') for m in mig] == ['food', 'fun'], f'old cash migrated in place: {mig!r}', tag)
+        w2 = await page.evaluate("__MM.weekCalc(0)")
+        check(abs(w2['sp']['spent'] - w0['sp']['spent'] - 5) < 0.01, 'migrated food/fun cash counts toward Spending', tag)
+        await page.evaluate("localStorage.removeItem('moneyman.cash.v1')"); await page.reload(); await page.wait_for_selector('#app:not([hidden])'); await page.wait_for_timeout(700)
         # ---- bills: mark paid, persists, next month resets
         await page.click('.tab[data-tab="bills"]'); await page.wait_for_timeout(700)
         k = await page.evaluate("__MM.billInstances().find(b => !b.paid && b.id !== 'rent').key")
@@ -125,8 +150,13 @@ async def run(w, h):
         check(names and all('McDonald' in n for n in names), f'search filters ({len(names)})', tag)
         await shot(page, tag, 'activity-search')
         await page.click('[data-action="clear-q"]'); await page.wait_for_timeout(300)
-        await page.click('.fchip[data-f="gas"]'); await page.wait_for_timeout(300)
-        cats = await page.evaluate("__MM.txList().map(t => t.category)"); check(cats and set(cats) == {'gas'}, f'gas filter {set(cats)}', tag)
+        chips = await page.locator('.fchip').all_inner_texts()
+        check(chips == ['All', 'Spending', 'Bills', 'Income', 'Transfers'], f'filter chips {chips!r}', tag)
+        await page.click('.fchip[data-f="spending"]'); await page.wait_for_timeout(300)
+        cats = await page.evaluate("__MM.txList().map(t => t.category)")
+        check(cats and set(cats) <= {'food', 'groceries', 'fun', 'shopping', 'gas', 'spending'}, f'spending filter {set(cats)}', tag)
+        await page.click('.fchip[data-f="bills"]'); await page.wait_for_timeout(300)
+        cats = await page.evaluate("__MM.txList().map(t => t.category)"); check(cats and set(cats) <= {'bills', 'fees', 'subs'}, f'bills filter {set(cats)}', tag)
         await page.click('.fchip[data-f="all"]'); await page.wait_for_timeout(300)
         await page.locator('#tx-list [data-action="tx"]').first.click(); await page.wait_for_selector('.tx-head'); await page.wait_for_timeout(400)
         check('Category' in await page.inner_text('.sheet'), 'transaction detail sheet', tag)

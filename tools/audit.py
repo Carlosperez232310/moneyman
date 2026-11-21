@@ -37,17 +37,17 @@ add("- **Root cause of the day lag:** every refresh, the routine hand-edited `bu
 add('## 3. This week (Wed→Tue) budget math')
 w, bw = A['week'], B['week']
 add(f"- Week {w['start']} → {w['end']}: paycheck {m(w['paycheck'])} ({'estimate' if w['estimate'] else 'posted ' + str(w['paycheck_date'])}) − $147 Steam − $275 bills = **{m(w['budget'])}** "
-    f"→ Food {m(w['budgets']['food'])} / Fun {m(w['budgets']['fun'])}. App had {m(bw['budget'])} ({'matches' if abs(bw['budget'] - w['budget']) < 0.01 else 'DIFFERENT'}).")
+    f"(one Spending budget). App had {m(bw['budget'])} ({'matches' if abs(bw['budget'] - w['budget']) < 0.01 else 'DIFFERENT'}).")
 cur = next(x for x in A['weeks'] if x['current'])
-add(f"- Spent: eating out {m(cur['spent']['eating_out'])} + groceries/snacks {m(cur['spent']['groceries'])} = food {m(cur['spent']['food'])} (left {m(cur['left']['food'])}); "
-    f"fun {m(cur['spent']['fun'])} + shopping {m(cur['spent']['shopping'])} = {m(cur['spent']['fun_total'])} (left {m(cur['left']['fun'])}); gas {m(cur['spent']['gas'])} (not in either bucket).")
+add(f"- Spent: eating out {m(cur['spent']['eating_out'])} + groceries/snacks {m(cur['spent']['groceries'])} = food {m(cur['spent']['food'])} ; "
+    f"fun {m(cur['spent']['fun'])} + shopping {m(cur['spent']['shopping'])} = {m(cur['spent']['fun_total'])}; gas {m(cur['spent']['gas'])} → Spending {m(cur['spent']['spending'])} (left {m(cur['left']['spending'])}).")
 est = A['paycheck']['estimate']; ph = A['paycheck']['history']
 add(f"- **Bug:** before Wednesday's paycheck posts, the routine used a $590 placeholder. Last {len(ph[-6:])} real paychecks: "
     + ', '.join(f"{p['date'][5:]} {m(p['amount'])}" for p in ph[-6:]) + f" → average {m(est)}. New: the average is used and the week is labeled *estimate* until the real paycheck posts.")
 add("- Paychecks sometimes land Thursday (Nov 12 after Veterans Day); the week logic now accepts a paycheck posted Wed–Fri.")
 add('- Past weeks (new week switcher in the app):')
 for x in A['weeks']:
-    add(f"  - {x['start']}: paycheck {m(x['paycheck'])}{' (est)' if x['estimate'] else ''}, budget {m(x['budget'])}, food {m(x['spent']['food'])}/{m(x['budgets']['food'])}, fun {m(x['spent']['fun_total'])}/{m(x['budgets']['fun'])}, gas {m(x['spent']['gas'])}")
+    add(f"  - {x['start']}: paycheck {m(x['paycheck'])}{' (est)' if x['estimate'] else ''}, budget {m(x['budget'])}, spending {m(x['spent']['spending'])}/{m(x['budgets']['spending'])} (food {m(x['spent']['food'])}, fun {m(x['spent']['fun_total'])}, gas {m(x['spent']['gas'])})")
 add('')
 
 add('## 4. Bills (auto-detected from the bank)')

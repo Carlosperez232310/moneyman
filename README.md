@@ -5,10 +5,11 @@ Live: https://carlosperez232310.github.io/moneyman/ — install on iPhone: Safar
 Static, client-side PWA for Carlos Perez, built on the same architecture as SYSTEM (static shell, service worker,
 manifest, subsetted woff2 fonts, safe-area aware layout, Playwright layout tests) with a dark fintech UI:
 **Home** (greeting, nudge, featured goal ring, quick tiles), **Goals** (data-driven goals with on-pace math),
-**Week** (separate Food and Fun budgets for the Wed–Tue week, each with budget/spent/left, bar, per-day allowance and
-purchase list; "I spent cash" quick-add asks Food or Fun), **Bills** (weekly reserve, this month's bills as a checklist:
+**Week** (ONE Spending budget for the Wed–Tue week: eating out, groceries & snacks, fun, shopping and gas all count;
+budget/spent/left, bar, per-day allowance, a breakdown by merchant category (informational only) and one purchase list;
+"I spent cash" quick-add logs straight into Spending), **Bills** (weekly reserve, this month's bills as a checklist:
 tap the circle to move a bill into **Paid**; bank payments auto-check; resets every month; cancelled subscriptions as a
-small collapsible row) and **Activity** (transactions with All / Food / Fun / Bills / Income / Transfers filters).
+small collapsible row) and **Activity** (transactions with All / Spending / Bills / Income / Transfers filters).
 
 ## Privacy model
 - The repo and site are public, so **financial data is only ever published encrypted**: `data.enc.json` is
@@ -24,7 +25,7 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
   `tools/publish-pages.sh` refuses to publish if the blob isn't an encrypted envelope, if any shipped file contains the
   passcode, or if any non-blob file contains plain data. `tools/update_data.py` rejects 6+ digit runs (account numbers);
   account masks must be last-4.
-- Cash quick-add entries (`moneyman.cash.v1`, keyed by week) and bill checkboxes (`moneyman.paid.v1`, keyed
+- Cash quick-add entries (`moneyman.cash.v1`, keyed by week, `cat: "spending"`; older `food`/`fun` entries are migrated in place on unlock and keep the old tag as `was`) and bill checkboxes (`moneyman.paid.v1`, keyed
   `<bill id>:<YYYY-MM>`, e.g. `verizon:2026-10`; only overrides of the automatic state are stored, ~4 months kept) live
   only in the phone's `localStorage` and work offline.
 
@@ -38,7 +39,7 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
   `private/accounts.json` (available + current, bank sync time) and `private/tx_latest.csv` (follows "Full text:" pointers)
 - `tools/mm_engine.py` — pure money engine (no I/O): Wed→Tue weeks, paycheck estimate (avg of last 6), learned bill
   posting days + auto-paid, rent set-aside, Steam transfer owed, **safe to spend** (min of checking cash-flow after bills,
-  rent, Steam and a month-end cushion vs. food+fun budget left), goal projection, subscriptions (charged-after-cancel),
+  rent, Steam and a month-end cushion vs. Spending budget left), goal projection, subscriptions (charged-after-cancel),
   possible duplicates, insights, alerts. Rules live in `DEFAULT_CONFIG`.
 - `tools/audit.py --before <old plain> --after <new plain> --out <md>` — accuracy audit report (kept in `private/`)
 - `tools/update_data.py <plain.json>` — validate + encrypt → `public/data.enc.json`
@@ -47,8 +48,8 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
 - `tools/daily_update.sh <plain.json>` — **the daily one-liner**: update_data → publish → verify
 - `tests/test_engine.py` — synthetic-data tests for every engine rule (no real numbers in this repo).
 - `tests/test_app.py` — Playwright at 390x844 and 430x932 (simulated iPhone safe areas): no horizontal overflow,
-  no clipped text, tap targets ≥ 38px, tab bar pinned; wrong-passcode error, unlock, all tabs, food/fun split + goal =
-  savings balance, Food/Fun/Income filters, cash into Fun (Food untouched), bill auto-paid / check → Paid / persists /
+  no clipped text, tap targets ≥ 38px, tab bar pinned; wrong-passcode error, unlock, all tabs, one Spending row/bucket = engine + goal =
+  savings balance, All/Spending/Bills/Income/Transfers filters, cash into Spending (no Food/Fun choice), old food/fun cash migrated, bill auto-paid / check → Paid / persists /
   uncheck / next-month reset, remember-device reload, lock & forget. Saves screenshots (deviceScaleFactor 2) to `screenshots/`.
   Also: menu/Home "Next update" line + bank note, pull-to-refresh toast ("This is the newest data …"); app safe-to-spend and
   week math = engine values; safe-to-spend and account sheets, transaction detail, search + filters, insights, week switcher,

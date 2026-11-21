@@ -47,13 +47,16 @@ eq(E.week_paycheck(tx, D('2026-11-11'))['amount'], 700, 'Thursday paycheck (holi
 w_next = E.week_summary(tx, D('2026-11-25'), CFG, D('2026-11-25'))
 eq(w_next['estimate'], True, 'no paycheck yet -> estimate')
 eq(w_next['paycheck'], round((700 + 690 + 710 + 560 + 700 + 702.40) / 6, 2), 'estimate = average of last 6')
-# budget split
+# one weekly Spending budget (food + groceries + fun + shopping + gas all count)
 w = E.week_summary(tx, D('2026-11-18'), CFG, today)
 eq(w['budget'], 702.40 - 147 - 275, 'budget = paycheck - 147 - 275')
-eq(w['budgets']['food'], round(280.40 * 0.7), 'food = round(70%)')
-eq(w['budgets']['fun'], 280.40 - 196, 'fun = rest')
-eq(w['spent']['eating_out'], 18.35, 'eating out'); eq(w['spent']['groceries'], 28.48, 'groceries'); eq(w['spent']['gas'], 12, 'gas tracked separately')
-eq(w['left']['food'], 196 - 46.83, 'food left'); eq(w['left']['fun'], 84.40 - 9.50, 'fun left')
+eq(w['budgets'], {'spending': 280.40}, 'one Spending budget = whole weekly budget (no Food/Fun split)')
+eq('split' in CFG, False, 'no food/fun split in config')
+eq(w['spent']['eating_out'], 18.35, 'eating out tag'); eq(w['spent']['groceries'], 28.48, 'groceries tag'); eq(w['spent']['gas'], 12, 'gas tag')
+eq(w['spent']['spending'], 18.35 + 28.48 + 9.50 + 12, 'spending = eating out + groceries + fun + gas')
+eq(w['left'], {'spending': round(280.40 - 68.33, 2)}, 'spending left')
+for c in ('food', 'groceries', 'fun', 'shopping', 'gas'): eq(E.bucket_of(c), 'spending', f'{c} counts toward Spending')
+for c in ('bills', 'subs', 'transfer', 'cash', 'income', 'fees'): eq(E.bucket_of(c), None, f'{c} is not Spending')
 # bills: learned posting day + paid detection
 mb = {b['id']: b for b in E.bills_for_month(CFG['bills'], today, tx)}
 eq(mb['verizon']['expected_post'], '2026-11-03', 'Verizon posts the 3rd (learned)')
@@ -83,6 +86,7 @@ eq(cf['cushion'], round(sum(i['amount'] for i in week1['items']) - 275, 2), 'cus
 eq(cf['safe_cashflow'], round(412.50 - 40 - 25 - 37 - cf['cushion'], 2), 'safe cashflow formula')
 eq(res['safe']['amount'], min(cf['safe_cashflow'], res['safe']['budget_left']), 'safe = min(cashflow, budget left)')
 eq(res['safe']['limited_by'], 'bills', 'limited by bills')
+eq(res['safe']['budget_left'], res['week']['left']['spending'], 'safe uses Spending budget left')
 # goal
 g = res['goal']
 eq(g['paydays_left'], ['2026-11-25', '2026-12-02', '2026-12-09', '2026-12-16', '2026-12-23', '2026-12-30'], 'paydays left')
@@ -99,6 +103,7 @@ prime = next(c for c in res['subscriptions']['cancelled'] if c['name'] == 'Amazo
 eq([x['amount'] for x in prime['charged_after']], [1.99, 14.99], 'Prime charged after cancel')
 eq(any('Overdraft' in a['title'] for a in res['alerts']), True, 'overdraft alert')
 eq(res['insights']['this_week']['gas'], 12, 'insight gas this week')
+eq(res['insights']['this_week']['spending'], 68.33, 'insight spending this week')
 # categorizer
 eq(C.category('BANK_FEES_OVERDRAFT_FEES', 'Overdraft protection to Checking', -35.99, 'Overdraft Protection Withdraw'), 'transfer', 'OD is a transfer')
 eq(C.category('LOAN_PAYMENTS_BNPL', 'Klarna', -55.37, 'Walmart'), 'bills', 'BNPL is a bill')

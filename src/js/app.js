@@ -58,6 +58,7 @@ const P = {
   gift: '<rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7"/><path d="M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5"/>',
   sparkle: '<path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z"/>',
   chef: '<path d="M17 21a1 1 0 0 0 1-1v-5.4c0-.4.3-.8.7-1a4 4 0 0 0-2.1-7.6 5 5 0 0 0-9.2 0 4 4 0 0 0-2.1 7.6c.4.2.7.6.7 1V20a1 1 0 0 0 1 1z"/><path d="M6 17h12"/>',
+  spending: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   wallet: '<path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/>',
   calendar: '<rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17"/>',
   target: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/>',
@@ -82,10 +83,12 @@ Object.assign(P, {
 });
 const ic = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true">${P[n] || P.other}</svg>`;
 const CAT = { food: 'Eating out', groceries: 'Groceries & snacks', fun: 'Fun', subs: 'Subscription', shopping: 'Shopping', gas: 'Gas',
-  bills: 'Bill', fees: 'Bank fee', income: 'Income', refund: 'Refund', transfer: 'Transfer', cash: 'Cash withdrawal', other: 'Other' };
-const bucketOf = c => (c === 'food' || c === 'groceries') ? 'food' : (c === 'fun' || c === 'shopping') ? 'fun' : null;
-const FILTERS = [['all', 'All'], ['food', 'Eating out', ['food']], ['groceries', 'Groceries', ['groceries']], ['fun', 'Fun', ['fun', 'shopping']],
-  ['gas', 'Gas', ['gas']], ['bills', 'Bills', ['bills', 'fees', 'subs']], ['income', 'Income', ['income', 'refund']], ['transfer', 'Transfers', ['transfer', 'cash']]];
+  bills: 'Bill', fees: 'Bank fee', income: 'Income', refund: 'Refund', transfer: 'Transfer', cash: 'Cash withdrawal', spending: 'Cash spend', other: 'Other' };
+// ONE weekly Spending budget: every discretionary category counts (merchant category is only an informational tag).
+const SPEND_CATS = ['food', 'groceries', 'fun', 'shopping', 'gas', 'spending'];
+const bucketOf = c => SPEND_CATS.includes(c) ? 'spending' : null;
+const FILTERS = [['all', 'All'], ['spending', 'Spending', SPEND_CATS], ['bills', 'Bills', ['bills', 'fees', 'subs']],
+  ['income', 'Income', ['income', 'refund']], ['transfer', 'Transfers', ['transfer', 'cash']]];
 
 /* ---------------- formatting & dates ---------------- */
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -215,10 +218,17 @@ const D = () => S.data;
 const acct = kind => (D().accounts || []).find(a => a.kind === kind || a.id === kind) || null;
 const store = (k, def) => { try { return JSON.parse(localStorage.getItem(k) || 'null') ?? def; } catch (e) { return def; } };
 const cashAll = () => store(K_CASH, []) || [];
+function migrateCash() {  // old entries were tagged 'food' or 'fun'; both now count toward Spending (old tag kept as `was`)
+  const all = cashAll(); let n = 0;
+  for (const e of all) if (e && e.cat !== 'spending') { if (e.cat) e.was = e.cat; e.cat = 'spending'; n++; }
+  if (n) localStorage.setItem(K_CASH, JSON.stringify(all));
+  return n;
+}
+const cashTx = e => ({ id: e.id, date: e.date, amount: -e.amount, merchant: e.note || 'Cash spend', category: 'spending', cash: true });
 const cashFor = start => cashAll().filter(e => e.week === start);
 function weekList() {  // oldest -> newest
   const d = D(); if (d.weeks && d.weeks.length) return d.weeks;
-  const w = d.week; return w ? [{ ...w, budgets: w.budgets || { food: Math.round(w.budget * 0.7), fun: r2(w.budget - Math.round(w.budget * 0.7)) } }] : [];
+  const w = d.week; return w ? [{ ...w, budgets: { spending: +w.budget || 0 } }] : [];
 }
 function nextPayday() {
   const p = D().paycheck || {}; let n = p.next_date ? dn(p.next_date) : null; const t = dn(todayISO());
@@ -228,24 +238,18 @@ function weekCalc(idx = 0) {
   const ws = weekList(); const w = ws[ws.length - 1 - idx]; if (!w) return null;
   const t = dn(todayISO()), st = dn(w.start), en = dn(w.end), isCur = idx === 0;
   const tx = (D().transactions || []).filter(x => x.date >= w.start && x.date <= w.end);
-  const cash = cashFor(w.start).map(x => ({ id: x.id, date: x.date, amount: -x.amount, merchant: x.note || (x.cat === 'fun' ? 'Cash · fun' : 'Cash · food'),
-    category: x.cat === 'fun' ? 'fun' : 'food', cash: true }));
-  const items = [...tx.filter(x => bucketOf(x.category) || x.category === 'gas'), ...cash].sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
+  const items = [...tx.filter(x => bucketOf(x.category)), ...cashFor(w.start).map(cashTx)].sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
   const sum = cats => r2(items.filter(x => cats.includes(x.category)).reduce((s, x) => s - x.amount, 0));
-  const b = w.budgets || {}, foodB = +b.food || 0, funB = +b.fun || 0;
+  const b = w.budgets || {};
+  const budget = b.spending != null ? +b.spending : w.budget != null ? +w.budget : r2((+b.food || 0) + (+b.fun || 0));
   const daysLeft = Math.max(0, Math.min(en - st + 1, en - Math.max(t, st) + 1));
   const elapsed = Math.min(1, Math.max(0, (t - st + 1) / (en - st + 1)));
-  const mk = (key, budget, cats) => {
-    const its = items.filter(i => cats.includes(i.category)), spent = r2(its.reduce((s, i) => s - i.amount, 0)), left = r2(budget - spent);
-    const pct = budget > 0 ? spent / budget : (spent > 0 ? 2 : 0), tone = pct > 1 ? 'red' : pct > 0.85 ? 'amber' : '';
-    const status = left < 0 ? ['red', `Over by ${fmt(-left)}`] : !isCur ? ['', `${fmt(left)} left over`] : pct > 0.85 ? ['amber', 'Almost gone'] : pct > elapsed + 0.1 ? ['amber', 'Spending fast'] : ['mint', 'On track'];
-    return { key, budget, spent, left, pct, tone, status, items: its, perDay: daysLeft ? Math.max(0, left) / daysLeft : 0 };
-  };
-  const food = mk('food', foodB, ['food', 'groceries']), fun = mk('fun', funB, ['fun', 'shopping']);
-  food.eatingOut = sum(['food']); food.groceries = r2(food.spent - food.eatingOut);
-  const gasItems = items.filter(i => i.category === 'gas'), gas = r2(gasItems.reduce((s, i) => s - i.amount, 0));
-  return { w, idx, isCur, isFuture: st > t, ended: t > en, food, fun, gas, gasItems, daysLeft, elapsed, budget: +w.budget || r2(foodB + funB),
-    left: r2(food.left + fun.left), spent: r2(food.spent + fun.spent) };
+  const spent = r2(items.reduce((s, i) => s - i.amount, 0)), left = r2(budget - spent);
+  const pct = budget > 0 ? spent / budget : (spent > 0 ? 2 : 0), tone = pct > 1 ? 'red' : pct > 0.85 ? 'amber' : '';
+  const status = left < 0 ? ['red', `Over by ${fmt(-left)}`] : !isCur ? ['', `${fmt(left)} left over`] : pct > 0.85 ? ['amber', 'Almost gone'] : pct > elapsed + 0.1 ? ['amber', 'Spending fast'] : ['mint', 'On track'];
+  const parts = { eatingOut: sum(['food']), groceries: sum(['groceries']), fun: sum(['fun', 'shopping']), gas: sum(['gas']), cash: sum(['spending']) };
+  const sp = { key: 'spending', budget, spent, left, pct, tone, status, items, parts, perDay: daysLeft ? Math.max(0, left) / daysLeft : 0 };
+  return { w, idx, isCur, isFuture: st > t, ended: t > en, sp, daysLeft, elapsed, budget, left, spent };
 }
 function safeCalc() {
   const s = D().safe, wk = weekCalc(0); if (!wk) return null;
@@ -323,7 +327,7 @@ function vHome() {
       <div class="hero-amt">${countM(sc.amount)}</div>
       <div class="hero-sub">${sc.ended ? 'This week ended. New numbers arrive with the next update.' : sc.amount > 0 ? `<b>${fmt(sc.perDay)}</b>/day for ${plural(sc.days, 'day')}` : 'Hold off on extra spending until payday'}</div>
       <div class="hero-note">${sc.limited === 'bills' && sc.budgetLeft > sc.amount
-        ? `${ic('info')}<span>Your food + fun budget has ${fmt0(sc.budgetLeft)} left, but bills and rent cash coming up need the rest.</span>`
+        ? `${ic('info')}<span>Your spending budget has ${fmt0(sc.budgetLeft)} left, but bills and rent cash coming up need the rest.</span>`
         : `${ic('check')}<span>Bills before payday are covered.${d.week && d.week.estimate ? ' Budget uses an estimated paycheck.' : ''}</span>`}<span class="more">How?${ic('chevR')}</span></div>
     </button>`;
   }
@@ -333,10 +337,11 @@ function vHome() {
     <button class="card tile" data-action="nav" data-tab="goals"><div class="lbl">${ic('savings')}Savings</div>
       <div class="v">${sav ? countM(sav.current) : '—'}</div><div class="s">Steam Frame fund</div></button></div>`;
   if (wk) {
-    const row = (b, name, icon) => `<div class="bk-row"><div class="bk-h"><span class="bk-n">${ic(icon)}${name}</span><span class="bk-v ${b.left < 0 ? 'neg' : ''}">${b.left < 0 ? `${fmt(-b.left)} over` : `${fmt(b.left)} left`}</span></div>
-      ${bar(b.pct, b.tone, wk.isCur ? wk.elapsed : null)}<div class="bk-s"><span>${fmt(b.spent)} of ${smart(b.budget)}</span><span>${wk.daysLeft && b.left > 0 ? `${fmt(b.perDay)}/day` : ''}</span></div></div>`;
+    const b = wk.sp;
+    const row = `<div class="bk-row"><div class="bk-h"><span class="bk-n">${ic('spending')}Spending</span><span class="bk-v ${b.left < 0 ? 'neg' : ''}">${b.left < 0 ? `${fmt(-b.left)} over` : `${fmt(b.left)} left`}</span></div>
+      ${bar(b.pct, b.tone, wk.isCur ? wk.elapsed : null)}<div class="bk-s"><span>${fmt(b.spent)} spent of ${smart(b.budget)}</span><span>${wk.isCur && wk.daysLeft && b.left > 0 ? `${fmt(b.perDay)}/day · ${plural(wk.daysLeft, 'day')} left` : ''}</span></div></div>`;
     h += `<button class="card week-card" data-action="nav" data-tab="week"><div class="wc-h"><span class="eyebrow">This week · ${esc(shortDate(wk.w.start))}–${esc(shortDate(wk.w.end))}</span>${wk.w.estimate ? pill('amber', 'Estimate') : ''}</div>
-      ${row(wk.food, 'Food', 'food')}${row(wk.fun, 'Fun', 'fun')}</button>`;
+      ${row}</button>`;
   }
   const al = alerts();
   if (al.length) h += secH('Heads up', `${al.length}`) + `<div class="alerts">${(S.allAlerts ? al : al.slice(0, 2)).map(alertCard).join('')}
@@ -386,7 +391,7 @@ function vWeek() {
   const n = weekList().length, idx = Math.min(S.weekIdx, n - 1), c = weekCalc(idx);
   if (!c) return `<h1 class="h-title">This week</h1><div class="card empty">No week data yet.</div>`;
   const w = c.w, label = idx === 0 ? 'This week' : idx === 1 ? 'Last week' : `${idx} weeks ago`;
-  let h = `<div class="page-h"><div class="eyebrow">Food & fun · Wed–Tue</div><h1 class="h-title">${label}</h1></div>
+  let h = `<div class="page-h"><div class="eyebrow">Spending · Wed–Tue</div><h1 class="h-title">${label}</h1></div>
     <div class="switcher" role="group" aria-label="Choose week">
       <button class="sw-btn" data-action="week" data-d="1" ${idx >= n - 1 ? 'disabled' : ''} aria-label="Earlier week">${ic('chevL')}</button>
       <div class="sw-mid"><b>${esc(wdShort(w.start))} – ${esc(shortDate(w.end))}</b><span>${c.isCur ? `Day ${Math.max(1, Math.round(c.elapsed * 7))} of 7` : c.left >= 0 ? `Finished ${fmt(c.left)} under` : `Finished ${fmt(-c.left)} over`}</span></div>
@@ -394,20 +399,18 @@ function vWeek() {
   h += `<div class="card pad-s split"><div class="split-h"><span class="eyebrow">Spending money</span><span class="money">${smart(c.budget)}</span></div>
     <div class="formula"><span>${w.estimate ? 'Paycheck <i class="est">estimate</i>' : 'Paycheck'} <b>${fmt(+w.paycheck || 0)}</b></span><span>− Steam <b>$147</b></span><span>− Bills <b>$275</b></span></div>
     ${w.estimate ? `<div class="fine">${ic('info')}Paycheck hasn't posted yet, so this uses your recent average. It updates when the real one lands.</div>` : ''}</div>`;
-  for (const b of [c.food, c.fun]) h += budgetCard(b, c);
+  const b = c.sp;
+  h += budgetCard(b, c);
   if (c.isCur) h += `<button class="btn mint block" data-action="cash">${ic('plus')}I spent cash</button>`;
-  h += `<div class="card pad-s gas-row"><div class="ico gas">${ic('gas')}</div><div class="mid"><div class="t1">Gas</div><div class="t2">Not part of food or fun</div></div><div class="amt">${fmt(c.gas)}</div></div>`;
-  for (const b of [c.food, c.fun]) {
-    const name = b.key === 'food' ? 'Food' : 'Fun';
-    h += secH(`${name} purchases`, `${b.items.length} · ${fmt(b.spent)}`) + `<div class="card list">${b.items.length ? b.items.map(txRow).join('') : `<div class="empty">No ${name.toLowerCase()} spending ${c.isCur ? 'yet' : 'that week'}.</div>`}</div>`;
-  }
+  h += secH('Purchases', `${b.items.length} · ${fmt(b.spent)}`) + `<div class="card list">${b.items.length ? b.items.map(txRow).join('') : `<div class="empty">No spending ${c.isCur ? 'yet' : 'that week'}.</div>`}</div>`;
   return h;
 }
 function budgetCard(b, c) {
-  const name = b.key === 'food' ? 'Food' : 'Fun';
-  const split = b.key === 'food' ? `<div class="sub-split"><span><i class="dot-eat"></i>Eating out <b>${fmt(b.eatingOut)}</b></span><span><i class="dot-gro"></i>Groceries & snacks <b>${fmt(b.groceries)}</b></span></div>` : '';
-  return `<div class="card bucket ${b.key}"><div class="top"><div class="bh"><div class="ico ${b.key}">${ic(b.key)}</div>
-      <div><div class="eyebrow">${name} · left</div><div class="big ${b.left < 0 ? 'neg' : ''}">${countM(b.left)}</div></div></div>${pill(b.status[0], b.status[1])}</div>
+  const P_ = b.parts, chips = [['eat', 'Eating out', P_.eatingOut], ['gro', 'Groceries & snacks', P_.groceries], ['fun', 'Fun & shopping', P_.fun], ['gas', 'Gas', P_.gas], ['cash', 'Cash', P_.cash]]
+    .filter(x => x[2] > 0.004 || x[0] === 'eat' || x[0] === 'gro');
+  const split = `<div class="sub-split">${chips.map(([k, n, v]) => `<span><i class="dot-${k}"></i>${n} <b>${fmt(v)}</b></span>`).join('')}</div>`;
+  return `<div class="card bucket spending"><div class="top"><div class="bh"><div class="ico spending">${ic('spending')}</div>
+      <div><div class="eyebrow">Spending · left</div><div class="big ${b.left < 0 ? 'neg' : ''}">${countM(b.left)}</div></div></div>${pill(b.status[0], b.status[1])}</div>
     ${bar(b.pct, b.tone, c.isCur ? c.elapsed : null)}
     <div class="meta"><span><b>${fmt(b.spent)}</b> of ${smart(b.budget)}</span><span>${c.isCur && c.daysLeft ? (b.left > 0 ? `<b>${fmt(b.perDay)}</b>/day · ${plural(c.daysLeft, 'day')} left` : `${plural(c.daysLeft, 'day')} to go`) : ''}</span></div>${split}</div>`;
 }
@@ -484,8 +487,7 @@ function vBills() {
 /* ---------------- Activity ---------------- */
 function txList() {
   const d = D(), f = FILTERS.find(x => x[0] === S.filter) || FILTERS[0], q = S.q.trim().toLowerCase();
-  const cash = cashAll().map(x => ({ id: x.id, date: x.date, merchant: x.note || 'Cash spend', amount: -x.amount, category: x.cat === 'fun' ? 'fun' : 'food', cash: true }));
-  let tx = [...cash, ...(d.transactions || [])];
+  let tx = [...cashAll().map(cashTx), ...(d.transactions || [])];
   if (f[2]) tx = tx.filter(t => f[2].includes(t.category));
   if (q) tx = tx.filter(t => (t.merchant + ' ' + (t.desc || '') + ' ' + (CAT[t.category] || '') + ' ' + (t.note || '') + ' ' + Math.abs(t.amount).toFixed(2)).toLowerCase().includes(q));
   return tx.sort((a, b) => (b.date > a.date ? 1 : b.date < a.date ? -1 : 0));
@@ -515,8 +517,9 @@ function txGroups() {
 }
 function vInsights() {
   const ins = D().insights; if (!ins) return `<div class="card empty">Insights arrive with the next data update.</div>`;
-  const wk = weekCalc(0), rows = [['Food', 'food', wk ? wk.food.spent : ins.this_week.food, 'food'], ['Eating out', 'eating_out', wk ? wk.food.eatingOut : ins.this_week.eating_out, 'food'],
-    ['Groceries & snacks', 'groceries', wk ? wk.food.groceries : ins.this_week.groceries, 'groceries'], ['Fun', 'fun_total', wk ? wk.fun.spent : ins.this_week.fun_total, 'fun'], ['Gas', 'gas', wk ? wk.gas : ins.this_week.gas, 'gas']];
+  const wk = weekCalc(0), tw = ins.this_week || {}, pp = wk ? wk.sp.parts : null;
+  const rows = [['Spending', 'spending', wk ? wk.sp.spent : (tw.spending || 0), 'spending'], ['Eating out', 'eating_out', pp ? pp.eatingOut : tw.eating_out, 'food'],
+    ['Groceries & snacks', 'groceries', pp ? pp.groceries : tw.groceries, 'groceries'], ['Fun & shopping', 'fun_total', pp ? pp.fun : tw.fun_total, 'fun'], ['Gas', 'gas', pp ? pp.gas : tw.gas, 'gas']];
   const mx = Math.max(1, ...rows.map(r => Math.max(r[2], ins.avg_4w[r[1]] || 0)));
   const mon = dfmt(`${ins.month}-01`, { month: 'long' });
   let h = secH('This week vs your 4-week average') + `<div class="card pad-s cmp">${rows.map(([n, k, v, ic_]) => {
@@ -642,7 +645,7 @@ function safeSheet() {
     const w = cf.cushion_weeks.find(x => x.net < 0);
     if (w) h += `<p class="fine">${ic('info')}Week of ${esc(shortDate(w.payday))}: ${esc(w.items.map(i => `${i.name} ${fmt0(i.amount)}`).join(', '))} = ${fmt0(w.bills_out)}, but the paycheck's bill reserve only adds ${fmt0(w.reserve_in)}. The cushion keeps that covered.</p>`;
   }
-  h += `<div class="calc"><div class="calc-h">2 · Your food + fun budget</div>${kv('Food left', fmt(wk.food.left))}${kv('Fun left', fmt(wk.fun.left))}${kv('Budget left', fmt(sc.budgetLeft), 'tot')}</div>
+  h += `<div class="calc"><div class="calc-h">2 · Your spending budget</div>${kv('This week\'s budget', fmt(wk.sp.budget))}${kv('Spent so far', '−' + fmt(wk.sp.spent))}${kv('Budget left', fmt(sc.budgetLeft), 'tot')}</div>
     <p class="fine">${ic('check')}<span>Safe to spend is the smaller one: <b>${fmt(sc.amount)}</b>. ${sc.days ? `Spread over ${plural(sc.days, 'day')} that's ${fmt(sc.perDay)}/day.` : ''}</span></p>`;
   openSheet(h);
 }
@@ -653,7 +656,7 @@ function txSheet(id) {
   openSheet(`<div class="tx-head"><div class="ico big ${t.category}">${ic(t.category)}</div><h2>${esc(t.merchant)}</h2><div class="tx-amt ${inn ? 'pos' : ''}">${inn ? '+' : ''}${fmt(t.amount)}</div>
       ${t.pending ? pill('amber', 'Pending') : ''}</div>
     <div class="calc">${kv('Date', esc(dfmt(t.date, { weekday: 'long', month: 'long', day: 'numeric' })))}${kv('Category', esc(CAT[t.category] || t.category))}
-      ${bucketOf(t.category) ? kv('Counts toward', bucketOf(t.category) === 'food' ? 'Food budget' : 'Fun budget') : ''}
+      ${bucketOf(t.category) ? kv('Counts toward', 'Spending budget') : ''}
       ${kv('Account', esc(a ? `${a.name} ••${a.mask}` : t.account ? '••' + t.account : '—'))}${t.desc ? kv('Bank says', esc(t.desc)) : ''}${t.note ? kv('Note', esc(t.note)) : ''}
       ${t.od ? kv('What it is', 'Automatic overdraft-protection transfer between your own accounts') : ''}</div>
     ${sameM.length > 1 ? `<p class="fine">${ic('pie')}${esc(t.merchant)}: ${plural(m30.length, 'charge')} in the last 30 days (${fmt(m30.reduce((s, x) => s - x.amount, 0))}), ${plural(sameM.length, 'charge')} since ${esc(shortDate(sameM[sameM.length - 1].date))}.</p>
@@ -667,27 +670,24 @@ function acctSheet(kind) {
     ${holds.map(h => `<p class="fine">${ic('clock')}${fmt(h.gap)} difference: ${esc(h.why)}.</p>`).join('')}
     <p class="fine">${ic('info')}<span>MoneyMan uses <b>available</b> for safe-to-spend, because that's what the bank will let you spend right now.</span></p>`);
 }
-function cashSheet(preset) {
-  let cat = preset === 'fun' ? 'fun' : 'food';
-  openSheet(`<h2>I spent cash</h2><p class="sub">Comes out of this week's Food or Fun budget. Saved only on this phone.</p>
+function cashSheet() {
+  openSheet(`<h2>I spent cash</h2><p class="sub">Comes out of this week's spending budget. Saved only on this phone.</p>
     <div class="amt-in"><span>$</span><input id="cash-amt" type="text" inputmode="decimal" placeholder="0" autocomplete="off" aria-label="Amount"></div>
     <div class="quick">${[5, 10, 20, 40].map(v => `<button data-q="${v}">$${v}</button>`).join('')}</div>
-    <div class="seg" role="radiogroup" aria-label="Food or fun"><button class="${cat === 'food' ? 'on' : ''}" data-c="food" role="radio" aria-checked="${cat === 'food'}">${ic('food')}Food</button><button class="${cat === 'fun' ? 'on' : ''}" data-c="fun" role="radio" aria-checked="${cat === 'fun'}">${ic('fun')}Fun</button></div>
     <input class="text-in" id="cash-note" type="text" placeholder="What was it? (optional)" maxlength="40" autocomplete="off">
     <button class="btn mint block" id="cash-save">Log cash</button>`, o => {
     const amt = $('#cash-amt', o);
     const fit = () => { amt.style.width = Math.max(1, (amt.value || '0').length) * 0.64 + 0.15 + 'em'; };
     fit(); amt.addEventListener('input', fit); setTimeout(() => amt.focus(), 350);
     o.querySelectorAll('[data-q]').forEach(b => b.onclick = () => { amt.value = b.dataset.q; fit(); haptic(); });
-    o.querySelectorAll('[data-c]').forEach(b => b.onclick = () => { cat = b.dataset.c; o.querySelectorAll('[data-c]').forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-checked', x === b); }); haptic(); });
     $('#cash-save', o).onclick = () => {
       const v = Math.round(parseFloat((amt.value || '').replace(/[^0-9.]/g, '')) * 100) / 100;
       if (!(v > 0 && v < 10000)) { amt.parentElement.classList.remove('pop'); void amt.offsetWidth; amt.parentElement.classList.add('pop'); haptic(25); amt.focus(); return; }
       const all = cashAll(); const cur = weekCalc(0);
-      all.push({ id: Date.now().toString(36), amount: v, note: $('#cash-note', o).value.trim(), cat, date: todayISO(), week: cur.w.start });
+      all.push({ id: Date.now().toString(36), amount: v, note: $('#cash-note', o).value.trim(), cat: 'spending', date: todayISO(), week: cur.w.start });
       localStorage.setItem(K_CASH, JSON.stringify(all.slice(-200)));
       closeSheet(); haptic(12); render(false);
-      const wb = weekCalc(0)[cat]; toast(`Logged ${fmt(v)} cash · ${cat === 'fun' ? 'Fun' : 'Food'} left ${fmt(wb.left)}`);
+      const wb = weekCalc(0).sp; toast(`Logged ${fmt(v)} cash · Spending left ${fmt(wb.left)}`);
     };
   });
 }
@@ -809,6 +809,7 @@ function go(tab) {
 }
 function startApp() {
   $('#lock').hidden = true; $('#app').hidden = false;
+  try { migrateCash(); } catch (e) {}
   const t = new URLSearchParams(location.search).get('tab') || sessionStorage.getItem(K_TAB);
   if (t && VIEWS[t]) S.tab = t;
   render(true);
@@ -825,7 +826,7 @@ document.addEventListener('click', e => {
   else if (a === 'clear-q') { S.q = ''; render(false); }
   else if (a === 'search') { closeSheet(true); S.q = el.dataset.q; S.filter = 'all'; S.actView = 'list'; if (S.tab !== 'activity') go('activity'); else render(false); }
   else if (a === 'week') { const n = weekList().length; S.weekIdx = Math.max(0, Math.min(n - 1, S.weekIdx + +el.dataset.d)); haptic(); render(true, -el.dataset.d); }
-  else if (a === 'cash') { haptic(); cashSheet(el.dataset.b); }
+  else if (a === 'cash') { haptic(); cashSheet(); }
   else if (a === 'paid') togglePaid(el);
   else if (a === 'tx') { haptic(); txSheet(el.dataset.id); }
   else if (a === 'safe') { haptic(); safeSheet(); }

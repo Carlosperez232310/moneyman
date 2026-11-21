@@ -6,7 +6,7 @@ id,date,acct,amount,name,merchant,cat,pending format) into MoneyMan `transaction
 
 Merchant names are cleaned, card/account numbers are reduced to last-4, and each row gets a MoneyMan category:
 food, groceries, fun, subs, shopping, gas, bills, income, refund, transfer, cash, fees, other
-(app weekly buckets: Food = food + groceries, Fun = fun + shopping).
+(the app has ONE weekly Spending budget: food + groceries + fun + shopping + gas; categories are informational tags).
 Output is sorted newest first and de-duplicated by id. Never commit the CSV inputs."""
 import csv, json, sys, re, argparse, hashlib
 
@@ -19,7 +19,7 @@ FUN_MERCHANTS = ('color me mine', 'superhive', 'crossroads gaming', 'movies on t
 GAS_STATIONS = ('marathon', 'chevron', 'shell', 'arco', 'space age', 'pacific pride', '76 ')
 
 def category(cat, merchant, amount, raw=''):
-    """MoneyMan categories. Weekly buckets in the app: Food = food + groceries; Fun = fun + shopping."""
+    """MoneyMan categories (informational). food, groceries, fun, shopping and gas all count toward the weekly Spending budget."""
     c = (cat or '').upper(); m = merchant.lower(); r = (raw or '').upper()
     if r.startswith('OVERDRAFT PROTECTION'): return 'transfer'          # savings -> checking auto-transfer, not a fee
     if c.startswith('INCOME'): return 'income'
@@ -38,7 +38,7 @@ def category(cat, merchant, amount, raw=''):
     if c == 'GENERAL_MERCHANDISE_CONVENIENCE_STORES': return 'groceries'      # convenience-store snacks/food
     if c.startswith('FOOD_AND_DRINK') or 'doordash' in m: return 'food'
     if c.startswith('ENTERTAINMENT') or any(g in m for g in DIGITAL): return 'fun'
-    if c.startswith('GENERAL_MERCHANDISE'): return 'shopping'                # other discretionary -> Fun bucket
+    if c.startswith('GENERAL_MERCHANDISE'): return 'shopping'                # other discretionary -> Spending
     return 'other' if amount < 0 else 'income'
 
 def clean(name, merchant, cat, amount, last4):

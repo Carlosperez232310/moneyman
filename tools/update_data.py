@@ -35,9 +35,9 @@ def validate(d):
             if k not in g: errs.append(f'goal missing {k}: {g}')
     ids = [b.get('id') for b in d.get('bills', {}).get('items', [])]
     if len(ids) != len(set(ids)) or None in ids: errs.append('bills.items need unique "id"s (used for the paid checkboxes)')
-    sp = w.get('split')
-    if sp is not None and not (isinstance(sp, dict) and sp.get('food', 0) >= 0 and sp.get('fun', 0) >= 0 and sp.get('food', 0) + sp.get('fun', 0) > 0):
-        errs.append('week.split must look like {"food": 0.7, "fun": 0.3}')
+    bs = w.get('budgets')
+    if bs is not None and not (isinstance(bs, dict) and isinstance(bs.get('spending'), (int, float))):
+        errs.append('week.budgets must look like {"spending": 276.2} (one weekly Spending budget)')
     for t in d.get('transactions', []):
         for k in ('date', 'merchant', 'amount'):
             if k not in t: errs.append(f'transaction missing {k}: {t}'); break

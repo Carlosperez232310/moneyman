@@ -7,21 +7,22 @@ Inputs:  accounts (finance_list_accounts rows or the app's account dicts), trans
 Output:  the plain data.json dict (schema 3, backward compatible with schema 2 readers).
 
 Rules (Carlos's):
-- Week runs Wednesday -> Tuesday. Weekly food+fun budget = this week's paycheck - $147 Steam Frame - $275 bills reserve,
-  split 70% Food / 30% Fun. Before the paycheck posts, the budget uses the average of the last 6 real paychecks and is
+- Week runs Wednesday -> Tuesday. ONE weekly Spending budget = this week's paycheck - $147 Steam Frame - $275 bills
+  reserve. Everything discretionary counts toward it: eating out, groceries & snacks, fun, shopping and gas (merchant
+  categories stay on each transaction as an informational tag; there are no separate budgets). Before the paycheck posts, the budget uses the average of the last 6 real paychecks and is
   flagged as an estimate.
 - Rent ~$650 cash, due the 31st (month end), funded with ~$325 cash from each of the last two Wednesday paydays.
 - Bills are detected as paid from real bank transactions (merchant + amount window), and their usual posting day is
   learned from history (e.g. Verizon is due the 1st but posts on the 3rd).
 - "Safe to spend" = checking available - bills that post before next payday - rent set-aside still owed - Steam
   transfer still owed this week - cushion for the next weeks' bill clusters that the $275/week reserve can't cover,
-  capped by what is left of this week's food+fun budget.
+  capped by what is left of this week's Spending budget.
 """
 import calendar, datetime as dt, math, re, statistics
 from collections import defaultdict
 
 DEFAULT_CONFIG = {
-    'steam_per_payday': 147, 'bills_reserve': 275, 'split': {'food': 0.7, 'fun': 0.3},
+    'steam_per_payday': 147, 'bills_reserve': 275,
     'payday_weekday': 2,  # Wednesday (Mon=0)
     'rent': {'amount': 650, 'per_payday': 325, 'set_aside_paydays': 2},
     'goal': {'id': 'steam-frame', 'name': 'Steam Frame', 'target': 2000, 'due': '2026-12-31', 'icon': 'gamepad'},
@@ -54,13 +55,14 @@ DEFAULT_CONFIG = {
     ],
 }
 
-FOOD_CATS, FUN_CATS = ('food', 'groceries'), ('fun', 'shopping')
+FOOD_CATS = ('food', 'groceries')
+SPEND_CATS = ('food', 'groceries', 'fun', 'shopping', 'gas')  # all count toward the one weekly Spending budget
 D = dt.date.fromisoformat
 r2 = lambda v: round(v + 0.0, 2)
 
 
 def bucket_of(cat):
-    return 'food' if cat in FOOD_CATS else 'fun' if cat in FUN_CATS else None
+    return 'spending' if cat in SPEND_CATS else None
 
 
 def week_start(day, weekday=2):
@@ -103,17 +105,17 @@ def week_summary(tx, start, cfg, today):
     est = pc is None
     pay = pc['amount'] if pc else paycheck_estimate([t for t in tx if t['date'] < start.isoformat()])
     budget = r2(pay - cfg['steam_per_payday'] - cfg['bills_reserve'])
-    food_b = round(budget * cfg['split']['food']); fun_b = r2(budget - food_b)
     items = [t for t in tx if start.isoformat() <= t['date'] <= end.isoformat()]
     spend = lambda cats: r2(sum(-t['amount'] for t in items if t['category'] in cats and t['amount'] < 0)
                            - sum(t['amount'] for t in items if t['category'] in cats and t['amount'] > 0))
     w = {'start': start.isoformat(), 'end': end.isoformat(), 'paycheck': r2(pay), 'paycheck_date': pc['date'] if pc else None,
-         'estimate': est, 'budget': budget, 'budgets': {'food': food_b, 'fun': fun_b},
+         'estimate': est, 'budget': budget, 'budgets': {'spending': budget},
          'spent': {'eating_out': spend(('food',)), 'groceries': spend(('groceries',)), 'fun': spend(('fun',)),
                    'shopping': spend(('shopping',)), 'gas': spend(('gas',))}}
     w['spent']['food'] = r2(w['spent']['eating_out'] + w['spent']['groceries'])
     w['spent']['fun_total'] = r2(w['spent']['fun'] + w['spent']['shopping'])
-    w['left'] = {'food': r2(food_b - w['spent']['food']), 'fun': r2(fun_b - w['spent']['fun_total'])}
+    w['spent']['spending'] = r2(w['spent']['food'] + w['spent']['fun_total'] + w['spent']['gas'])
+    w['left'] = {'spending': r2(budget - w['spent']['spending'])}
     w['current'] = start <= today <= end
     return w
 
@@ -339,8 +341,8 @@ def spending_insights(tx, today, weeks):
     return {'month': today.strftime('%Y-%m'), 'top_merchants': top, 'eating_out_month': cat('food'), 'eating_out_count': sum(1 for x in month if x['category'] == 'food'),
             'groceries_month': cat('groceries'), 'gas_month': cat('gas'), 'fun_month': r2(cat('fun') + cat('shopping')),
             'fast_food_month': r2(sum(-x['amount'] for x in ff)), 'fast_food_count': len(ff),
-            'this_week': {k: (cur['spent'][k] if cur else 0) for k in ('food', 'eating_out', 'groceries', 'fun_total', 'gas')},
-            'avg_4w': {k: avg(k) for k in ('food', 'eating_out', 'groceries', 'fun_total', 'gas')}}
+            'this_week': {k: (cur['spent'][k] if cur else 0) for k in ('spending', 'food', 'eating_out', 'groceries', 'fun_total', 'gas')},
+            'avg_4w': {k: avg(k) for k in ('spending', 'food', 'eating_out', 'groceries', 'fun_total', 'gas')}}
 
 
 # ---------------------------------------------------------------- top level
@@ -362,7 +364,7 @@ def build(accounts, tx, cfg, today, now, connection=None, cash_flow_extra=None):
     if cur['estimate']:
         steam_owed = 0.0  # no paycheck yet this week -> nothing to move yet
     cf = cashflow(chk['available'], bills, rent, steam_owed, today, next_pd, cfg)
-    budget_left = r2(cur['left']['food'] + cur['left']['fun'])
+    budget_left = cur['left']['spending']
     safe = r2(max(0.0, min(cf['safe_cashflow'], max(0.0, budget_left))))
     days_left = (D(cur['end']) - today).days + 1
     # savings pace

@@ -345,7 +345,7 @@ function beforePayday() {  // what has to come out of checking before next payda
   for (const b of billInstances()) if (!b.paid && b.id !== 'rent' && b.post >= t && b.post < np) out.push({ name: b.name, date: b.post, amount: billAmt(b), icon: b.icon, kind: 'bill', approx: b.approx });
   for (const b of billInstances()) if (!b.paid && b.id !== 'rent' && b.post < t) out.push({ name: b.name, date: b.post, amount: billAmt(b), icon: b.icon, kind: 'late', approx: b.approx });
   const r = D().rent; if (r && r.owed_now > 0) out.push({ name: 'Rent cash to set aside', date: t, amount: r.owed_now, icon: 'home', kind: 'rent', note: `${fmt0(r.withdrawn)} of ${fmt0(r.amount)} withdrawn` });
-  const st = D().steam; if (st && st.owed > 0) out.push({ name: 'Move to Steam Frame savings', date: t, amount: st.owed, icon: 'savings', kind: 'steam', note: `${fmt0(st.done)} of ${fmt0(st.per_payday)} moved this week` });
+  const st = D().steam; if (st && st.owed > 0) out.push({ name: 'Steam Frame transfer', date: t, amount: st.owed, icon: 'savings', kind: 'steam', note: `${fmt0(st.done)} of ${fmt0(st.per_payday)} moved this week` });
   return out.sort((a, b) => a.date.localeCompare(b.date));
 }
 function tlRow(x) {
@@ -593,6 +593,7 @@ function skeleton() {
 /* ---------------- sheets & toasts ---------------- */
 function toast(msg, ms = 2600, tone = '') {
   const t = document.createElement('div'); t.className = 'toast' + (tone ? ' ' + tone : ''); t.setAttribute('role', 'status'); t.innerHTML = `<i></i><span>${esc(msg)}</span>`;
+  document.querySelectorAll('#toasts .toast').forEach(o => o.remove());
   $('#toasts').appendChild(t); setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, ms);
 }
 function openSheet(html, onMount) {
@@ -625,7 +626,7 @@ function safeSheet() {
     if (w) h += `<p class="fine">${ic('info')}Week of ${esc(shortDate(w.payday))}: ${esc(w.items.map(i => `${i.name} ${fmt0(i.amount)}`).join(', '))} = ${fmt0(w.bills_out)}, but the paycheck's bill reserve only adds ${fmt0(w.reserve_in)}. The cushion keeps that covered.</p>`;
   }
   h += `<div class="calc"><div class="calc-h">2 · Your food + fun budget</div>${kv('Food left', fmt(wk.food.left))}${kv('Fun left', fmt(wk.fun.left))}${kv('Budget left', fmt(sc.budgetLeft), 'tot')}</div>
-    <p class="fine">${ic('check')}Safe to spend is the smaller one: <b>${fmt(sc.amount)}</b>. ${sc.days ? `Spread over ${plural(sc.days, 'day')} that's ${fmt(sc.perDay)}/day.` : ''}</p>`;
+    <p class="fine">${ic('check')}<span>Safe to spend is the smaller one: <b>${fmt(sc.amount)}</b>. ${sc.days ? `Spread over ${plural(sc.days, 'day')} that's ${fmt(sc.perDay)}/day.` : ''}</span></p>`;
   openSheet(h);
 }
 function txSheet(id) {
@@ -647,7 +648,7 @@ function acctSheet(kind) {
   openSheet(`<h2>${esc(a.name)} ••${esc(a.mask)}</h2><p class="sub">${bank ? `Bank synced ${esc(whenPT(bank))}.` : ''} ${esc(BANK_NOTE)}</p>
     <div class="calc">${kv('Available to spend', fmt(a.available), 'tot')}${kv('Current balance', fmt(a.current))}${holds.map(h => kv('On hold', fmt(h.gap))).join('')}</div>
     ${holds.map(h => `<p class="fine">${ic('clock')}${fmt(h.gap)} difference: ${esc(h.why)}.</p>`).join('')}
-    <p class="fine">${ic('info')}MoneyMan uses <b>available</b> for safe-to-spend, because that's what the bank will let you spend right now.</p>`);
+    <p class="fine">${ic('info')}<span>MoneyMan uses <b>available</b> for safe-to-spend, because that's what the bank will let you spend right now.</span></p>`);
 }
 function cashSheet(preset) {
   let cat = preset === 'fun' ? 'fun' : 'food';

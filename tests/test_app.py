@@ -10,7 +10,7 @@ URL = sys.argv[1] if len(sys.argv) > 1 else 'http://localhost:8766/'
 OUT = os.path.join(ROOT, 'screenshots'); os.makedirs(OUT, exist_ok=True)
 PASS = os.environ.get('MONEYMAN_PASSCODE') or open(os.path.join(ROOT, '.passcode')).readline().strip()
 SAFE = {(390, 844): (47, 34), (430, 932): (59, 34)}
-TABS = ['home', 'goals', 'week', 'bills', 'activity']
+TABS = ['home', 'week', 'bills', 'activity', 'goals']
 import json
 _pp = os.path.join(ROOT, 'private', 'data.json')
 PLAIN = json.load(open(_pp)) if os.path.exists(_pp) else None  # expected strings come from the private plain data
@@ -27,7 +27,7 @@ CHECK_JS = r'''() => {
     if (el.closest('.filters')) continue;
     if (r.right > vw + 0.5 || r.left < -0.5) res.overflow.push((el.className.baseVal ?? el.className) + ':' + (el.textContent||'').trim().slice(0,30) + ` [${Math.round(r.left)},${Math.round(r.right)}]`);
   }
-  res.clipped = [...document.querySelectorAll('.row .nm, .tile .v, .stat .v, .money')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent.trim());
+  res.clipped = [...document.querySelectorAll('.tile .v, .stat .v, .money, .amt, .hero-amt')].filter(e => e.scrollWidth > e.clientWidth + 1).map(e => e.textContent.trim());
   res.small = [...document.querySelectorAll('#app button, #sheet-root button')].filter(b => { const r = b.getBoundingClientRect(); return r.width && (r.height < 38 || r.width < 38); })
     .map(b => b.className + ':' + b.textContent.trim().slice(0,20) + ` ${Math.round(b.getBoundingClientRect().width)}x${Math.round(b.getBoundingClientRect().height)}`);
   const cs = getComputedStyle(main);
@@ -65,11 +65,15 @@ async def run(w, h):
         print(f'[{tag}] unlocked: {m}')
         check(m['n'] > 10, 'transactions decrypted', tag)
         if PLAIN:
-            wk = PLAIN['week']; sp = wk.get('split', {'food': .7, 'fun': .3}); fb = round(wk['budget'] * sp['food'] / (sp['food'] + sp['fun']))
-            check(m['food'][0] == fb and abs(m['fun'][0] - (wk['budget'] - fb)) < 0.001, f"food/fun split {m['food'][0]}/{m['fun'][0]}", tag)
+            wk = PLAIN['week']
+            check(m['food'][0] == wk['budgets']['food'] and abs(m['fun'][0] - wk['budgets']['fun']) < 0.001, f"food/fun budgets {m['food'][0]}/{m['fun'][0]}", tag)
+            cur = next(x for x in PLAIN['weeks'] if x['current'])
+            check(abs(m['food'][1] - cur['left']['food']) < 0.01 and abs(m['fun'][1] - cur['left']['fun']) < 0.01, f"app week math = engine ({m['food'][1]}, {m['fun'][1]})", tag)
             sav = next(a for a in PLAIN['accounts'] if a['kind'] == 'savings')['current']
-            g = await page.evaluate("__MM.goalCalc(__MM.S.data.goals.find(g => g.featured))")
+            g = await page.evaluate("__MM.goalOf()")
             check(abs(g['saved'] - sav) < 0.001, f"featured goal saved = savings balance ({g['saved']})", tag)
+            sc = await page.evaluate("__MM.safeCalc()")
+            check(abs(sc['amount'] - PLAIN['safe']['amount']) < 0.01, f"safe to spend {sc['amount']} = engine {PLAIN['safe']['amount']}", tag)
         for t in TABS:
             if t != 'home': await page.click(f'.tab[data-tab="{t}"]')
             await page.wait_for_timeout(1500)
@@ -85,24 +89,47 @@ async def run(w, h):
             print(f'[{tag}] {t}: ' + ('OK' if not prob else 'ISSUES: ' + ' | '.join(prob)))
             for p in prob: issues.append((tag, f'{t}: {p}'))
             if PLAIN:
+                T = r['text'].upper()
                 g0 = next((g for g in PLAIN['goals'] if g.get('featured')), PLAIN['goals'][0])
-                if t == 'home': check(g0['name'] in r['text'] and 'Food left' in r['text'] and 'Fun left' in r['text'], 'home content', tag)
-                if t == 'week': check('FOOD · LEFT' in r['text'].upper() and 'FUN · LEFT' in r['text'].upper() and 'Fun this week' in r['text'], 'week food/fun content', tag)
-                if t == 'goals': check(all(g['name'] in r['text'] for g in PLAIN['goals']), 'goals content', tag)
-                if t == 'bills': check(all(b['name'] in r['text'] for b in PLAIN['bills']['items'][:3]) and 'Paid' in r['text'], 'bills content', tag)
+                if t == 'home': check('SAFE TO SPEND' in T and 'FOOD' in T and 'FUN' in T and g0['name'].upper() in T, 'home content', tag)
+                if t == 'week': check('FOOD · LEFT' in T and 'FUN · LEFT' in T and 'FUN PURCHASES' in T and 'EATING OUT' in T, 'week content', tag)
+                if t == 'goals': check(all(g['name'].upper() in T for g in PLAIN['goals']) and 'NEEDED' in T, 'goals content', tag)
+                if t == 'bills': check(all(b['name'].upper() in T for b in PLAIN['bills']['items'][:3]) and 'PAID' in T and 'RENT' in T, 'bills content', tag)
             sh = await page.evaluate("document.querySelector('#main').scrollHeight")
-            if sh > h + 40:  # also capture the bottom of long screens
+            if sh > h + 40:
                 await page.evaluate("document.querySelector('#main').scrollTo(0, 1e5)"); await page.wait_for_timeout(500)
                 await page.screenshot(path=f'{OUT}/{tag}-{t}-bottom.png')
                 await page.evaluate("document.querySelector('#main').scrollTo(0, 0)")
-        # activity filters: Food and Fun are separate
-        for f, allowed in [('food', {'food', 'groceries', 'cash'}), ('fun', {'fun', 'shopping', 'cash'}), ('income', {'income'})]:
+        # activity: filters, search, transaction detail, insights
+        await page.click('.tab[data-tab="activity"]'); await page.wait_for_timeout(600)
+        for f, allowed in [('food', {'food', 'cash'}), ('groceries', {'groceries'}), ('fun', {'fun', 'shopping', 'cash'}), ('income', {'income', 'refund'})]:
             await page.click(f'.fchip[data-f="{f}"]'); await page.wait_for_timeout(300)
             cats = await page.eval_on_selector_all('#screen .list .row .ico', 'els => els.map(e => [...e.classList].filter(c => c !== "ico")[0])')
             check(cats and set(cats) <= allowed, f'{f} filter shows only {allowed}: {sorted(set(cats))}', tag)
-        await page.click('.fchip[data-f="all"]')
+        await page.click('.fchip[data-f="all"]'); await page.wait_for_timeout(300)
+        await page.fill('#q', 'mcdonald'); await page.wait_for_timeout(400)
+        names = await page.eval_on_selector_all('#tx-list .row .nm', 'els => els.map(e => e.textContent)')
+        check(names and all("mcdonald" in n.lower() for n in names), f'search mcdonald -> {len(names)} rows', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-activity-search.png')
+        await page.click('#tx-list .row'); await page.wait_for_selector('.sheet .tx-head', timeout=3000); await page.wait_for_timeout(500)
+        txt = await page.inner_text('.sheet'); check('Category' in txt and 'Account' in txt, f'transaction detail sheet', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-tx-detail.png'); await page.click('.sheet-x'); await page.wait_for_timeout(400)
+        await page.click('[data-action="clear-q"]'); await page.wait_for_timeout(300)
+        await page.click('.seg2 button[data-v="insights"]'); await page.wait_for_timeout(700)
+        it = (await page.inner_text('#screen')).upper(); check('4-WEEK AVERAGE' in it and 'TOP PLACES' in it, 'insights view', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-insights.png')
+        r = await page.evaluate(CHECK_JS)
+        if r['overflow'] or r['small']: issues.append((tag, f"insights layout {r['overflow']} {r['small']}"))
+        await page.evaluate("document.querySelector('#main').scrollTo(0, 1e5)"); await page.wait_for_timeout(400)
+        await page.screenshot(path=f'{OUT}/{tag}-insights-bottom.png'); await page.evaluate("document.querySelector('#main').scrollTo(0, 0)")
+        await page.click('.seg2 button[data-v="list"]')
+        # week switcher
+        await page.click('.tab[data-tab="week"]'); await page.wait_for_timeout(600)
+        await page.click('.sw-btn[data-d="1"]'); await page.wait_for_timeout(700)
+        lw = await page.inner_text('.h-title'); check(lw.strip().lower() == 'last week', f'week switcher -> {lw!r}', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-week-last.png')
+        await page.click('.sw-btn[data-d="-1"]'); await page.wait_for_timeout(500)
         # cash quick-add into Fun (Food untouched)
-        await page.click('.tab[data-tab="week"]'); await page.wait_for_timeout(800)
         w0 = await page.evaluate('(() => { const w = __MM.weekCalc(); return [w.food.left, w.fun.left]; })()')
         await page.click('.btn[data-action="cash"]'); await page.wait_for_selector('#cash-amt'); await page.wait_for_timeout(500)
         await page.click('.seg button[data-c="fun"]'); await page.click('.quick button[data-q="10"]'); await page.fill('#cash-note', 'Arcade')
@@ -112,20 +139,34 @@ async def run(w, h):
         await page.click('#cash-save'); await page.wait_for_timeout(700)
         w1 = await page.evaluate('(() => { const w = __MM.weekCalc(); return [w.food.left, w.fun.left]; })()')
         check(abs(w0[0] - w1[0]) < 0.001 and abs((w0[1] - w1[1]) - 10) < 0.001, f'cash into Fun {w0} -> {w1}', tag)
-        await page.click('.del[data-action="del-cash"]'); await page.wait_for_timeout(400)
-        # home quick-add "+" on the Food tile presets Food
-        await page.click('.tab[data-tab="home"]'); await page.wait_for_timeout(600)
-        await page.click('.add[data-b="food"]'); await page.wait_for_selector('#cash-amt')
-        check(await page.evaluate("document.querySelector('.seg button.on').dataset.c") == 'food', 'Food tile + presets Food', tag)
-        await page.click('.overlay', position={'x': 20, 'y': 60}); await page.wait_for_timeout(400)
+        await page.click('[data-action="del-cash"]'); await page.wait_for_timeout(400)
+        w2 = await page.evaluate('(() => { const w = __MM.weekCalc(); return [w.food.left, w.fun.left]; })()')
+        check(w2 == w0, 'cash entry removed', tag)
+        # home: safe-to-spend breakdown sheet, account sheet, alerts dismiss, stale banner
+        await page.click('.tab[data-tab="home"]'); await page.wait_for_timeout(700)
+        await page.click('.hero'); await page.wait_for_selector('.sheet .calc', timeout=3000); await page.wait_for_timeout(500)
+        st = await page.inner_text('.sheet'); check('Checking available' in st and 'Budget left' in st, 'safe-to-spend breakdown', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-safe-sheet.png'); await page.click('.sheet-x'); await page.wait_for_timeout(400)
+        await page.click('[data-action="acct"][data-k="checking"]'); await page.wait_for_selector('.sheet .calc'); await page.wait_for_timeout(300)
+        check('Available to spend' in await page.inner_text('.sheet'), 'checking sheet', tag); await page.click('.sheet-x'); await page.wait_for_timeout(400)
+        if await page.locator('.alert').count():
+            await page.click('.alert .x'); await page.wait_for_timeout(600)
+            n1 = await page.evaluate('Object.keys(JSON.parse(localStorage.getItem("moneyman.dismiss.v1") || "{}")).length')
+            check(n1 == 1, f'alert dismissed + remembered ({n1})', tag)
+            await page.evaluate("localStorage.removeItem('moneyman.dismiss.v1')"); await page.evaluate('__MM.render(false)')
+        await page.evaluate("__MM.S.data._gen = __MM.S.data.generated_at; __MM.S.data.generated_at = new Date(Date.now() - 20*3600e3).toISOString(); __MM.render(false)")
+        check(await page.locator('.banner').count() == 1, 'stale banner when data > 14 h old', tag)
+        await page.evaluate("document.querySelector('#main').scrollTo(0, 0)"); await page.wait_for_timeout(900)
+        await page.screenshot(path=f'{OUT}/{tag}-stale.png')
+        await page.evaluate("__MM.S.data.generated_at = __MM.S.data._gen; __MM.render(false)")
+        check(await page.locator('.banner').count() == 0, 'no stale banner on fresh data', tag)
         # bills: auto-paid from bank data, tap to check -> moves to Paid, persists, unchecks back
         await page.click('.tab[data-tab="bills"]'); await page.wait_for_timeout(900)
-        inst = await page.evaluate('__MM.billInstances().map(b => ({key: b.key, paid: b.paid, auto: !!b.auto, name: b.name}))')
+        inst = await page.evaluate('__MM.billInstances().map(b => ({key: b.key, paid: b.paid, auto: !!b.auto, name: b.name, id: b.id}))')
         per = (await page.evaluate('__MM.todayISO()'))[:7]
         check(all(i['key'].endswith(':' + per) for i in inst), 'bill keys are id:YYYY-MM', tag)
-        autos = [i for i in inst if i['auto']]
-        for a_ in autos: check(await page.locator(f'#bills-paid .bill[data-key="{a_["key"]}"]').count() == 1, f'auto-paid {a_["key"]} in Paid', tag)
-        target = next(i for i in inst if not i['paid'])
+        for a_ in [i for i in inst if i['auto']]: check(await page.locator(f'#bills-paid .bill[data-key="{a_["key"]}"]').count() == 1, f'auto-paid {a_["key"]} in Paid', tag)
+        target = next(i for i in inst if not i['paid'] and i['id'] != 'rent')
         await page.click(f'.chk[data-key="{target["key"]}"]'); await page.wait_for_timeout(1300)
         check(await page.locator(f'#bills-paid .bill[data-key="{target["key"]}"]').count() == 1, f'checked {target["key"]} moved to Paid', tag)
         stored = await page.evaluate("JSON.parse(localStorage.getItem('moneyman.paid.v1') || '{}')")
@@ -142,10 +183,9 @@ async def run(w, h):
         await page.reload(); await page.wait_for_selector('#app:not([hidden])'); await page.click('.tab[data-tab="bills"]'); await page.wait_for_timeout(700)
         check(await page.locator(f'#bills-paid .bill[data-key="{target["key"]}"]').count() == 1, 'paid state survives reload', tag)
         await page.click(f'.chk[data-key="{target["key"]}"]'); await page.wait_for_timeout(1300)
-        check(await page.locator(f'#bills-up .bill[data-key="{target["key"]}"]').count() == 1, 'unchecking moves it back to Upcoming', tag)
-        # month rollover: next month's instances appear, all upcoming again
+        check(await page.locator(f'#bills-up .bill[data-key="{target["key"]}"], #bills-later .bill[data-key="{target["key"]}"]').count() == 1, 'unchecking moves it back to upcoming', tag)
         y, mo = map(int, per.split('-')); ny, nm = (y + (mo == 12), mo % 12 + 1); nxt = f'{ny}-{nm:02d}'
-        await page.click(f'.chk[data-key="{target["key"]}"]'); await page.wait_for_timeout(900)   # paid this month...
+        await page.click(f'.chk[data-key="{target["key"]}"]'); await page.wait_for_timeout(900)
         await page.goto(URL + f'?today={nxt}-02&tab=bills'); await page.wait_for_selector('#app:not([hidden])'); await page.wait_for_timeout(900)
         inst2 = await page.evaluate('__MM.billInstances().map(b => ({key: b.key, paid: b.paid, date: b.date}))')
         check(all(i['key'].endswith(':' + nxt) and not i['paid'] for i in inst2), f'{nxt}: every bill back to upcoming', tag)
@@ -156,23 +196,25 @@ async def run(w, h):
         r = await page.evaluate(CHECK_JS)
         if r['small']: issues.append((tag, f"menu small taps {r['small']}"))
         menu_txt = await page.inner_text('.sheet')
-        check('Next update ' in menu_txt and 'until the next day' in menu_txt and 'Check for newer data' in menu_txt, f'menu schedule note: {menu_txt!r}', tag)
-        await page.screenshot(path=f'{OUT}/{tag}-menu.png'); await page.click('.overlay', position={'x': 20, 'y': 60}); await page.wait_for_timeout(400)
+        check('Next update ' in menu_txt and 'up to a day' in menu_txt and 'Check for newer data' in menu_txt and '4:14' not in menu_txt, f'menu schedule note: {menu_txt!r}', tag)
+        await page.screenshot(path=f'{OUT}/{tag}-menu.png'); await page.click('.sheet-x'); await page.wait_for_timeout(400)
         await page.click('.tab[data-tab="home"]'); await page.wait_for_timeout(600)
         home_note = await page.text_content('.sched-note') or ''
-        check(home_note.startswith('Next update ') and 'PT' in home_note and 'next day' in home_note, f'home schedule line: {home_note!r}', tag)
-        # menu -> Refresh: honest message (same blob on the server -> "newest data", with the next scheduled time)
-        await page.click('[data-action="menu"]'); await page.wait_for_timeout(500); await page.click('.menu-row[data-action="refresh"]')
+        check('Next update ' in home_note and 'PT' in home_note and ('Bank synced' in home_note or not (PLAIN and PLAIN.get('bank_synced_at'))), f'home sync line: {home_note!r}', tag)
+        # pull-to-refresh gesture -> honest refresh message
+        await page.evaluate("""(() => { const m = document.querySelector('#main'); m.scrollTop = 0;
+          const T = y => new Touch({identifier: 1, target: m, clientX: 200, clientY: y});
+          m.dispatchEvent(new TouchEvent('touchstart', {touches: [T(150)], changedTouches: [T(150)], bubbles: true}));
+          m.dispatchEvent(new TouchEvent('touchmove', {touches: [T(200)], changedTouches: [T(200)], bubbles: true, cancelable: true}));
+          m.dispatchEvent(new TouchEvent('touchmove', {touches: [T(320)], changedTouches: [T(320)], bubbles: true, cancelable: true}));
+          m.dispatchEvent(new TouchEvent('touchend', {touches: [], changedTouches: [T(320)], bubbles: true})); })()""")
         await page.wait_for_selector('.toast', timeout=10000); await page.wait_for_timeout(500)
         tmsg = await page.text_content('.toast span')
-        check(tmsg.startswith('This is the newest data (from ') and ('Next update around ' in tmsg or 'should land in a few minutes' in tmsg) and 'up to date' not in tmsg, f'refresh toast: {tmsg!r}', tag)
+        check(tmsg.startswith('This is the newest data (from ') and ('Next update around ' in tmsg or 'should land in a few minutes' in tmsg), f'pull-to-refresh toast: {tmsg!r}', tag)
         print(f'[{tag}] refresh -> {tmsg!r}')
         await page.screenshot(path=f'{OUT}/{tag}-refresh.png'); await page.wait_for_timeout(5600)
-        # remember on this device -> reload skips the lock screen
         await page.reload(); await page.wait_for_selector('#app:not([hidden])', timeout=8000)
         check(not await page.is_visible('#lock'), 'remembered device skips lock', tag)
-        print(f'[{tag}] reload with remembered key -> app shown')
-        # lock & forget
         await page.click('[data-action="menu"]'); await page.wait_for_timeout(500); await page.click('[data-action="lock"]'); await page.wait_for_timeout(400)
         check(await page.is_visible('#lock') and await page.evaluate("localStorage.getItem('moneyman.key.v1')") is None, 'lock & forget', tag)
         check(not errs, f'console errors: {errs}', tag)

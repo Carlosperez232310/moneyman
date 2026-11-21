@@ -32,35 +32,47 @@ small collapsible row) and **Activity** (transactions with All / Food / Fun / Bi
 - `src/` — source (index.html, css/app.css, js/app.js, sw.js, manifest.json, fonts/, icons/)
 - `public/` — build output (`tools/build.sh` copies src, stamps `__VER__`, keeps `public/data.enc.json`)
 - `tools/make_assets.py` — regenerates subsetted Inter/Sora woff2 fonts and the ring-"M" app icons
-- `tools/finance_csv_to_tx.py` — Finance-connector CSV → cleaned `transactions` JSON (categories, last-4 only)
+- `tools/finance_csv_to_tx.py` — Finance-connector CSV → cleaned `transactions` JSON (categories, last-4 only;
+  overdraft-protection transfers, Klarna-as-Walmart BNPL, gas vs snacks at gas stations, fun merchants, refunds)
+- `tools/ingest_finance.py --accounts <f> [--connections <f>] --tx <f> [<f>...]` — saves connector output to
+  `private/accounts.json` (available + current, bank sync time) and `private/tx_latest.csv` (follows "Full text:" pointers)
+- `tools/mm_engine.py` — pure money engine (no I/O): Wed→Tue weeks, paycheck estimate (avg of last 6), learned bill
+  posting days + auto-paid, rent set-aside, Steam transfer owed, **safe to spend** (min of checking cash-flow after bills,
+  rent, Steam and a month-end cushion vs. food+fun budget left), goal projection, subscriptions (charged-after-cancel),
+  possible duplicates, insights, alerts. Rules live in `DEFAULT_CONFIG`.
+- `tools/audit.py --before <old plain> --after <new plain> --out <md>` — accuracy audit report (kept in `private/`)
 - `tools/update_data.py <plain.json>` — validate + encrypt → `public/data.enc.json`
 - `tools/publish-pages.sh` — build + safety checks + force-push `public/` to `gh-pages`
 - `tools/verify_live.py` — waits until Pages serves the new blob and confirms it decrypts
 - `tools/daily_update.sh <plain.json>` — **the daily one-liner**: update_data → publish → verify
+- `tests/test_engine.py` — synthetic-data tests for every engine rule (no real numbers in this repo).
 - `tests/test_app.py` — Playwright at 390x844 and 430x932 (simulated iPhone safe areas): no horizontal overflow,
   no clipped text, tap targets ≥ 38px, tab bar pinned; wrong-passcode error, unlock, all tabs, food/fun split + goal =
   savings balance, Food/Fun/Income filters, cash into Fun (Food untouched), bill auto-paid / check → Paid / persists /
   uncheck / next-month reset, remember-device reload, lock & forget. Saves screenshots (deviceScaleFactor 2) to `screenshots/`.
-  Also: menu/Home "Next update" line + bank note, and menu → Refresh toast ("This is the newest data …"), screenshot `<vp>-refresh.png`.
+  Also: menu/Home "Next update" line + bank note, pull-to-refresh toast ("This is the newest data …"); app safe-to-spend and
+  week math = engine values; safe-to-spend and account sheets, transaction detail, search + filters, insights, week switcher,
+  alert dismiss, stale banner (>14 h).
 - `tests/offline.py` — service worker: network-first data (new blob shows on next load), menu → Refresh loads a newer
   blob in place ("Updated with data from …"), new build auto-installs and reloads the open app, Refresh finds a new
   build → "App updated · …", offline shell + last data, offline Refresh → "Offline, showing data from …", bill checkbox
   offline, manifest/apple-touch-icon.
-- `tests/test_schedule.py` — next-update math (9:02 AM / 4:14 PM / 9:02 PM PT, DST changes, browser in another zone) and
+- `tests/test_schedule.py` — next-update math (9:02 AM / 9:02 PM PT, DST changes, browser in another zone) and
   the exact Refresh messages.
   Run: `python3 -m http.server 8766 --directory public` then
   `python3 tests/test_schedule.py && python3 tests/test_app.py && python3 tests/offline.py`
   (pass `https://carlosperez232310.github.io/moneyman/` as an argument to run against the live site).
 
 ## Daily routine
-1. Pull live data (Finance connector: `finance_list_accounts`, `finance_query_account_transactions`).
-   Optionally save the transactions CSV to `private/` and run
-   `tools/finance_csv_to_tx.py private/tx.csv --acct <checking_account_id>=<last4> --acct <savings_account_id>=<last4> --label <last4>=Savings --since <30 days ago>`.
-2. Write the plain JSON to `/home/box/moneyman-app/private/data.json` (schema below; `private/build_data.py` is a template).
-3. Run: `tools/daily_update.sh /home/box/moneyman-app/private/data.json`
+1. Pull live data with the Finance connector, saving each result to a file (`write_to_file`): `finance_list_accounts`,
+   `finance_list_connections`, and `finance_query_account_transactions` from ~75 days back to today (limit 200, page until done).
+2. `python3 tools/ingest_finance.py --accounts <accounts file> --connections <connections file> --tx <tx file> [<more tx files>]`
+3. `python3 private/build_data.py` — computes everything (weeks, bills, rent, safe-to-spend, goal) → `private/data.json`.
+   No hand edits needed. (Fallback: if `accounts.json` is missing/older than 36 h, the `ACCOUNTS` constant in the script is used.)
+4. `tools/daily_update.sh /home/box/moneyman-app/private/data.json`
 
-Schedule (PT): the data routine republishes at **9:02 AM** and **9:02 PM**, and the **4:14 PM** daily check-in refreshes
-it too. The bank (OnPoint via Plaid) only syncs new transactions about once a day, late evening (~10:50 PM PT), so new
+Schedule (PT): the data routine republishes at **9:02 AM** and **9:02 PM** (the 4:14 PM check-in is paused, so the app
+no longer promises it). Data older than 14 h shows an amber "These numbers are from …" banner on Home. The bank (OnPoint via Plaid) only syncs new transactions about once a day, late evening (~10:50 PM PT), so new
 purchases can take until the next day to appear; the app says so on Home and in the menu, and shows "Next update ~<time> PT"
 (computed in America/Los_Angeles, `SCHEDULE` in `src/js/app.js` — update it if the routine times change).
 
@@ -81,7 +93,7 @@ Money = numbers in dollars. Dates = ISO `YYYY-MM-DD` (Pacific). Unknown optional
 
 ```jsonc
 {
-  "schema": 2,
+  "schema": 3,   // schema 3 adds safe, cashflow, rent, steam, holds, subscriptions, insights, alerts, weeks, savings_series, bank_synced_at (all optional; schema-2 fields kept)
   "generated_at": "2026-10-02T20:45:00-07:00",  // shown as "Updated 8:45 PM PT" (auto-filled if missing)
   "name": "Carlos",
   "headline": "Fun money is getting low — cook at home till payday",  // Home nudge

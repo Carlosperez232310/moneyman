@@ -16,7 +16,7 @@ def T(date, amount, merchant, cat, acct='2094', **kw):
 CFG = copy.deepcopy(E.DEFAULT_CONFIG)
 # --- history: paychecks every Wednesday (one on a Thursday), bills, transfers
 tx = []
-for d, a in [('2026-10-14', 700), ('2026-10-21', 690), ('2026-10-28', 710), ('2026-11-04', 560), ('2026-11-12', 700), ('2026-11-18', 698.20)]:
+for d, a in [('2026-10-14', 700), ('2026-10-21', 690), ('2026-10-28', 710), ('2026-11-04', 560), ('2026-11-12', 700), ('2026-11-18', 702.40)]:
     tx.append(T(d, a, 'Safeway paycheck', 'income'))
 tx += [T('2026-10-03', -147.53, 'Verizon', 'bills'), T('2026-11-03', -147.65, 'Verizon', 'bills'),
        T('2026-10-19', -135.17, 'Farmers Insurance', 'bills'), T('2026-11-18', -135.17, 'Farmers Insurance', 'bills'),
@@ -33,8 +33,8 @@ tx += [T('2026-10-03', -147.53, 'Verizon', 'bills'), T('2026-11-03', -147.65, 'V
        T('2026-10-08', -43.57, 'Bi-Mart', 'shopping'), T('2026-10-10', -43.57, 'Bi-Mart', 'shopping'),
        T('2026-11-03', -147.65, 'Overdraft protection to Checking', 'transfer', acct='0001', od=True),
        T('2026-11-03', 147.65, 'Overdraft protection from Savings', 'transfer', od=True)]
-ACC = [{'id': 'checking', 'kind': 'checking', 'name': 'Chk', 'mask': '2094', 'available': 323.24, 'current': 331.81},
-       {'id': 'savings', 'kind': 'savings', 'name': 'Sav', 'mask': '0001', 'available': 110.16, 'current': 115.16}]
+ACC = [{'id': 'checking', 'kind': 'checking', 'name': 'Chk', 'mask': '2094', 'available': 412.50, 'current': 421.07},
+       {'id': 'savings', 'kind': 'savings', 'name': 'Sav', 'mask': '0001', 'available': 90.40, 'current': 95.40}]
 today = D('2026-11-21'); now = dt.datetime(2026, 11, 21, 9, 2)
 
 # week boundaries
@@ -46,14 +46,14 @@ eq(E.week_paycheck(tx, D('2026-11-11'))['amount'], 700, 'Thursday paycheck (holi
 # estimate = mean of the last 6 paychecks before the week
 w_next = E.week_summary(tx, D('2026-11-25'), CFG, D('2026-11-25'))
 eq(w_next['estimate'], True, 'no paycheck yet -> estimate')
-eq(w_next['paycheck'], round((700 + 690 + 710 + 560 + 700 + 698.20) / 6, 2), 'estimate = average of last 6')
+eq(w_next['paycheck'], round((700 + 690 + 710 + 560 + 700 + 702.40) / 6, 2), 'estimate = average of last 6')
 # budget split
 w = E.week_summary(tx, D('2026-11-18'), CFG, today)
-eq(w['budget'], 698.20 - 147 - 275, 'budget = paycheck - 147 - 275')
-eq(w['budgets']['food'], round(276.20 * 0.7), 'food = round(70%)')
-eq(w['budgets']['fun'], 276.20 - 193, 'fun = rest')
+eq(w['budget'], 702.40 - 147 - 275, 'budget = paycheck - 147 - 275')
+eq(w['budgets']['food'], round(280.40 * 0.7), 'food = round(70%)')
+eq(w['budgets']['fun'], 280.40 - 196, 'fun = rest')
 eq(w['spent']['eating_out'], 18.35, 'eating out'); eq(w['spent']['groceries'], 28.48, 'groceries'); eq(w['spent']['gas'], 12, 'gas tracked separately')
-eq(w['left']['food'], 193 - 46.83, 'food left'); eq(w['left']['fun'], 83.20 - 9.50, 'fun left')
+eq(w['left']['food'], 196 - 46.83, 'food left'); eq(w['left']['fun'], 84.40 - 9.50, 'fun left')
 # bills: learned posting day + paid detection
 mb = {b['id']: b for b in E.bills_for_month(CFG['bills'], today, tx)}
 eq(mb['verizon']['expected_post'], '2026-11-03', 'Verizon posts the 3rd (learned)')
@@ -80,13 +80,13 @@ eq([b['id'] for b in cf['bills_before_payday']], ['xfinity'], 'only Xfinity post
 week1 = cf['cushion_weeks'][0]
 eq(sorted(i['id'] for i in week1['items']), sorted(['spotify', 'capital-one', 'google-one', 'farmers-1st', 'rent']), 'month-end cluster week items')
 eq(cf['cushion'], round(sum(i['amount'] for i in week1['items']) - 275, 2), 'cushion = cluster - reserve')
-eq(cf['safe_cashflow'], round(323.24 - 40 - 25 - 37 - cf['cushion'], 2), 'safe cashflow formula')
+eq(cf['safe_cashflow'], round(412.50 - 40 - 25 - 37 - cf['cushion'], 2), 'safe cashflow formula')
 eq(res['safe']['amount'], min(cf['safe_cashflow'], res['safe']['budget_left']), 'safe = min(cashflow, budget left)')
 eq(res['safe']['limited_by'], 'bills', 'limited by bills')
 # goal
 g = res['goal']
 eq(g['paydays_left'], ['2026-11-25', '2026-12-02', '2026-12-09', '2026-12-16', '2026-12-23', '2026-12-30'], 'paydays left')
-eq(g['need_per_payday'], round((2000 - 115.16) / 6, 2), 'need per payday')
+eq(g['need_per_payday'], round((2000 - 95.40) / 6, 2), 'need per payday')
 eq(g['eta_plan'], '2027-02-17', 'ETA at $147'); eq(g['on_track'], False, 'not on track')
 eq(E.goal_projection(2000, 2000, D('2026-12-31'), today, D('2026-11-25'), 147, 110, 0)['to_go'], 0, 'funded goal')
 eq(E.goal_projection(100, 2000, D('2026-12-31'), today, D('2026-11-25'), 147, 0, -5)['eta_actual'], None, 'no pace -> no ETA')

@@ -22,7 +22,7 @@
 <link rel="stylesheet" href="css/app.css?v=__VER__">
 </head>
 <body>
-<div class="aurora" aria-hidden="true"><i></i><i></i><i></i></div>
+<div class="aurora" aria-hidden="true"><i></i><i></i></div>
 
 <section id="lock" class="lock" hidden>
   <form class="lock-card" id="lock-form" autocomplete="on" novalidate>
@@ -50,14 +50,15 @@
       <button class="icon-btn" data-action="menu" aria-label="Menu"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/></svg></button>
     </div>
   </header>
-  <main id="main"><div id="screen" class="screen"></div></main>
-  <nav id="tabbar">
+  <div id="ptr" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.8 9.8 0 0 1 6.7 2.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+  <main id="main"><div id="screen" class="screen" aria-live="polite"></div></main>
+  <nav id="tabbar" aria-label="Sections">
     <span class="tab-ind" aria-hidden="true"></span>
     <button class="tab" data-action="nav" data-tab="home"><svg viewBox="0 0 24 24"><path d="M3.5 10.2 12 3.5l8.5 6.7V19a2 2 0 0 1-2 2h-4v-6h-5v6h-4a2 2 0 0 1-2-2z"/></svg><span>Home</span></button>
-    <button class="tab" data-action="nav" data-tab="goals"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/></svg><span>Goals</span></button>
     <button class="tab" data-action="nav" data-tab="week"><svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M8 3v4M16 3v4M3.5 10h17M8 14h3"/></svg><span>Week</span></button>
     <button class="tab" data-action="nav" data-tab="bills"><svg viewBox="0 0 24 24"><path d="M5 3h14v18l-2.3-1.5L14.3 21 12 19.5 9.7 21l-2.4-1.5L5 21z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg><span>Bills</span></button>
     <button class="tab" data-action="nav" data-tab="activity"><svg viewBox="0 0 24 24"><path d="M3 12h3.5l2.5-7 5 14 2.5-7H21"/></svg><span>Activity</span></button>
+    <button class="tab" data-action="nav" data-tab="goals"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/></svg><span>Goals</span></button>
   </nav>
 </div>
 <div id="sheet-root"></div>
